@@ -59,6 +59,8 @@ const envSchema = z.object({
     .transform((v) => v.split(",").map((s) => s.trim()).filter(Boolean)),
   RATE_LIMIT_MAX: z.coerce.number().int().positive().default(60),
   RATE_LIMIT_WINDOW_MS: z.coerce.number().int().positive().default(60_000),
+  /** Límite de páginas para la ingesta masiva de la wiki (--all). */
+  INGEST_MAX_PAGES: z.coerce.number().int().positive().default(500),
 });
 
 const parsed = envSchema.safeParse(process.env);

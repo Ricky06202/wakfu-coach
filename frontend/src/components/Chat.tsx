@@ -83,24 +83,41 @@ export function Chat() {
     }
   }
 
-  async function runIngest(kind: "wiki" | "seed" | "encyclopedia") {
+  async function runIngest(kind: "wiki" | "seed" | "encyclopedia", all = false) {
     if (ingesting) return;
     setIngesting(true);
-    setIngestMsg(`cargando ${kind}…`);
+    setIngestMsg(all ? "cargando wiki completo (puede tardar varios minutos)…" : `cargando ${kind}…`);
     setError(null);
     try {
-      const res = await fetch(`${API_BASE}/api/ingest/${kind}`, { method: "POST" });
-      const data = (await res.json()) as { ok?: boolean; guides?: number; pages?: number; items?: number; chunks?: number };
+      const res = await fetch(`${API_BASE}/api/ingest/${kind}`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: all ? JSON.stringify({ all: true }) : undefined,
+      });
+      const data = (await res.json()) as {
+        ok?: boolean;
+        guides?: number;
+        pages?: number;
+        items?: number;
+        chunks?: number;
+        message?: string;
+      };
       if (!res.ok || !data.ok) {
         setIngestMsg(`error al cargar ${kind}`);
         return;
       }
+      if (data.message) {
+        setIngestMsg(data.message);
+        return;
+      }
       setIngestMsg(
-        kind === "seed"
-          ? `seed cargado: ${data.chunks ?? "?"} fragmentos nuevos`
-          : kind === "wiki"
-            ? `wiki cargado: ${data.guides ?? data.pages ?? "?"} guías, ${data.chunks ?? "?"} fragmentos`
-            : `enciclopedia cargada: ${data.items ?? "?"} objetos`,
+        all
+          ? `wiki completo: ${data.guides ?? data.pages ?? "?"} guías, ${data.chunks ?? "?"} fragmentos`
+          : kind === "seed"
+            ? `seed cargado: ${data.chunks ?? "?"} fragmentos nuevos`
+            : kind === "wiki"
+              ? `wiki cargado: ${data.guides ?? data.pages ?? "?"} guías, ${data.chunks ?? "?"} fragmentos`
+              : `enciclopedia cargada: ${data.items ?? "?"} objetos`,
       );
       await refreshStats();
     } catch {
@@ -250,6 +267,14 @@ export function Chat() {
           className="rounded border border-edge px-1.5 py-0.5 uppercase tracking-wider text-muted transition hover:border-teal/50 hover:text-teal disabled:opacity-40"
         >
           + wiki
+        </button>
+        <button
+          onClick={() => void runIngest("wiki", true)}
+          disabled={ingesting}
+          title="Ingesta masiva: todas las páginas de la wiki (límite configurable)"
+          className="rounded border border-ember/40 px-1.5 py-0.5 uppercase tracking-wider text-muted transition hover:border-ember/70 hover:text-ember disabled:opacity-40"
+        >
+          + wiki todo
         </button>
         <button
           onClick={() => void runIngest("encyclopedia")}

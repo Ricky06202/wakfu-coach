@@ -1,9 +1,11 @@
 import { replaceGuideChunks, slugify, upsertGuide } from "./common.js";
 import type { SeedGuide } from "../seed-data.js";
+import { env } from "../env.js";
 import { raw } from "../db.js";
 
 const WIKI_API = "https://wakfu.wiki.gg/api.php";
 const USER_AGENT = "wakfu-coach/1.0 (asistente personal RAG; contacto: ricardosanjurg@gmail.com)";
+const RATE_LIMIT_MS = 250;
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -13,7 +15,7 @@ async function api(params: Record<string, string>): Promise<any> {
     url.searchParams.set(k, v);
   }
   const res = await fetch(url, { headers: { "User-Agent": USER_AGENT } });
-  if (!res.ok) throw new Error(`wiki.gg API HTTP ${res.status} para ${url.pathname}${url.search}`);
+  if (!res.ok) throw new Error(`wiki.gg API HTTP ${res.status}`);
   return res.json();
 }
 
@@ -29,6 +31,39 @@ export async function fetchWikitext(title: string): Promise<{ title: string; wik
   const page = data?.parse;
   if (!page) return null;
   return { title: page.title ?? title, wikitext: page.wikitext ?? "" };
+}
+
+/**
+ * Enumera TODAS las páginas de la wiki (ns0, sin redirects) vía `allpages`,
+ * paginando con `apcontinue`. Descarta subpáginas de variantes (contienen "/").
+ */
+export async function listAllPages(maxPages: number): Promise<string[]> {
+  const titles: string[] = [];
+  let apcontinue: string | undefined;
+  while (titles.length < maxPages) {
+    const params: Record<string, string> = {
+      action: "query",
+      list: "allpages",
+      apnamespace: "0",
+      apfilterredir: "nonredirects",
+      aplimit: "500",
+    };
+    if (apcontinue) params.apcontinue = apcontinue;
+    const data = await api(params);
+    const pages: Array<{ title: string }> = data?.query?.allpages ?? [];
+    for (const p of pages) {
+      const t = p.title;
+      if (t.includes("/")) continue; // variantes tipo "Item/Legendary"
+      if (t.length < 4) continue; // stubs
+      if (!/^[\p{L}\p{N}]/u.test(t)) continue; // stubs que empiezan con comillas/símbolos
+      titles.push(t);
+      if (titles.length >= maxPages) break;
+    }
+    apcontinue = data?.continue?.apcontinue;
+    if (!apcontinue) break;
+    await sleep(150);
+  }
+  return titles;
 }
 
 /** Convierte wikitext de MediaWiki a markdown plano consumible por el RAG. */
@@ -92,6 +127,37 @@ export interface WikiSummary {
   chunks: number;
 }
 
+/** Ingiere una página y la guarda como guía + fragmentos. Devuelve el id de la guía. */
+async function ingestPage(title: string, extraTags: string[]): Promise<number | null> {
+  const page = await fetchWikitext(title);
+  if (!page) {
+    console.warn(`[wiki] página "${title}" no disponible`);
+    return null;
+  }
+  const content = stripWikitext(page.wikitext).slice(0, 60_000);
+  if (content.length < 80) {
+    console.warn(`[wiki] "${title}" sin contenido útil (${content.length} chars)`);
+    return null;
+  }
+  const guide: SeedGuide = {
+    title: page.title,
+    url: `https://wakfu.wiki.gg/wiki/${encodeURIComponent(page.title.replace(/ /g, "_"))}`,
+    tags: [...extraTags, ...tagFromTitle(page.title)],
+    summary: content.slice(0, 200),
+    content,
+  };
+  const id = upsertGuide(guide);
+  replaceGuideChunks(id, guide);
+  return id;
+}
+
+function countGuideChunks(guideId: number): number {
+  const row = raw
+    .prepare("SELECT COUNT(*) AS n FROM chunks WHERE source_type='guide' AND source_id=?")
+    .get(guideId) as { n: number };
+  return row.n;
+}
+
 /**
  * Ingesta páginas de wakfu.wiki.gg para los términos indicados.
  * Cada página se guarda como guía + fragmentos (chunks) por sección.
@@ -115,30 +181,13 @@ export async function ingestWikiTerms(terms: string[], opts: { perTerm?: number 
 
     for (const title of chosen) {
       try {
-        const page = await fetchWikitext(title);
-        if (!page) {
-          console.warn(`[wiki] página "${title}" no disponible`);
-          continue;
+        const id = await ingestPage(title, [slugify(term)]);
+        if (id) {
+          summary.pages++;
+          summary.guides++;
+          summary.chunks += countGuideChunks(id);
         }
-        const content = stripWikitext(page.wikitext).slice(0, 60_000);
-        if (content.length < 80) {
-          console.warn(`[wiki] "${title}" sin contenido útil (${content.length} chars)`);
-          continue;
-        }
-        const guide: SeedGuide = {
-          title: page.title,
-          url: `https://wakfu.wiki.gg/wiki/${encodeURIComponent(page.title.replace(/ /g, "_"))}`,
-          tags: [slugify(term), ...tagFromTitle(page.title)],
-          summary: content.slice(0, 200),
-          content,
-        };
-        const id = upsertGuide(guide);
-        replaceGuideChunks(id, guide);
-        summary.pages++;
-        summary.guides++;
-        summary.chunks += (raw.prepare("SELECT COUNT(*) AS n FROM chunks WHERE source_type='guide' AND source_id=?").get(id) as { n: number }).n;
-        console.log(`[wiki] + guía "${page.title}" (${content.length} chars)`);
-        await sleep(400); // cortesía hacia la API
+        await sleep(RATE_LIMIT_MS);
       } catch (err) {
         console.warn(`[wiki] error con "${title}":`, (err as Error).message);
       }
@@ -147,10 +196,42 @@ export async function ingestWikiTerms(terms: string[], opts: { perTerm?: number 
   return summary;
 }
 
+/**
+ * Ingesta MASIVA: enumera todas las páginas de la wiki y las procesa
+ * hasta `maxPages` (env INGEST_MAX_PAGES o CLI --max).
+ */
+export async function ingestWikiAll(opts: { maxPages?: number; logProgress?: (done: number, total: number) => void } = {}): Promise<WikiSummary> {
+  const maxPages = opts.maxPages ?? env.INGEST_MAX_PAGES;
+  const summary: WikiSummary = { pages: 0, guides: 0, chunks: 0 };
+  const titles = await listAllPages(maxPages);
+  console.log(`[wiki] ingesta masiva: ${titles.length} páginas objetivo (máx ${maxPages})`);
+
+  for (let i = 0; i < titles.length; i++) {
+    const title = titles[i] as string;
+    try {
+      const id = await ingestPage(title, ["wiki"]);
+      if (id) {
+        summary.pages++;
+        summary.guides++;
+        summary.chunks += countGuideChunks(id);
+      }
+    } catch (err) {
+      console.warn(`[wiki] error con "${title}":`, (err as Error).message);
+    }
+    if ((i + 1) % 50 === 0 || i === titles.length - 1) {
+      console.log(`[wiki] progreso ${i + 1}/${titles.length}`);
+      opts.logProgress?.(i + 1, titles.length);
+    }
+    await sleep(RATE_LIMIT_MS);
+  }
+  return summary;
+}
+
 function tagFromTitle(title: string): string[] {
   const t = slugify(title);
   if (t.includes("ninivix")) return ["ninivix", "clase"];
-  if (t.includes("receta") || t.includes("craft") || t.includes("oficio")) return ["receta", "oficio", "crafting"];
+  if (t.includes("receta") || t.includes("craft") || t.includes("oficio") || t.includes("profession")) return ["receta", "oficio", "crafting"];
   if (t.includes("f2p") || t.includes("free")) return ["f2p"];
+  if (t.includes("item") || t.includes("equipment") || t.includes("weapon") || t.includes("armor")) return ["objeto", "equipo"];
   return [t];
 }

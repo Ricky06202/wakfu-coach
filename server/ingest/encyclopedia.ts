@@ -105,11 +105,13 @@ async function scanHtmlListings(): Promise<SeedItem[]> {
 export interface EncycSummary {
   items: number;
   chunks: number;
+  message?: string;
 }
 
 /** Ingesta desde la enciclopedia oficial. `jsonFeed` opcional (path o URL). */
 export async function ingestEncyclopedia(jsonFeed?: string): Promise<EncycSummary> {
   let items: SeedItem[] = [];
+  let message: string | undefined;
 
   if (jsonFeed) {
     items = await loadJsonFeed(jsonFeed);
@@ -119,16 +121,22 @@ export async function ingestEncyclopedia(jsonFeed?: string): Promise<EncycSummar
       items = await scanHtmlListings();
       console.log(`[enciclopedia] ${items.length} fichas desde escaneo HTML`);
     } catch (err) {
-      console.warn(`[enciclopedia] escaneo HTML falló: ${(err as Error).message}`);
+      message = (err as Error).message;
+      console.warn(`[enciclopedia] escaneo HTML falló: ${message}`);
     }
   }
 
   if (!items.length) {
+    const hint = jsonFeed
+      ? "el feed no devolvió fichas."
+      : message
+        ? `el sitio respondió un error (${message}). La enciclopedia de wakfu.com usa CloudFront y suele bloquear peticiones de servidores (403).`
+        : "la SPA no expone fichas en su HTML.";
     console.warn(
-      "[enciclopedia] no se pudo extraer contenido (la SPA cambia a menudo). " +
+      `[enciclopedia] no se pudo extraer contenido (${hint}). ` +
         "Usa `--wiki` (wakfu.wiki.gg, API MediaWiki estable) o `--encyclopedia --json <feed>` con un feed propio.",
     );
-    return { items: 0, chunks: 0 };
+    return { items: 0, chunks: 0, message: hint };
   }
 
   let chunksN = 0;
@@ -144,5 +152,5 @@ export async function ingestEncyclopedia(jsonFeed?: string): Promise<EncycSummar
       console.warn(`[enciclopedia] error con "${it.name}":`, (err as Error).message);
     }
   }
-  return { items: itemsN, chunks: chunksN };
+  return { items: itemsN, chunks: chunksN, message };
 }

@@ -14,7 +14,7 @@ import { chunkCount, initDb, saveChat } from "./db.js";
 import { answerQuestion, retrieve } from "./rag.js";
 import { env } from "./env.js";
 import { loadSeed } from "./ingest/seed.js";
-import { ingestWikiTerms } from "./ingest/wiki.js";
+import { ingestWikiAll, ingestWikiTerms } from "./ingest/wiki.js";
 import { ingestEncyclopedia } from "./ingest/encyclopedia.js";
 
 /* ------------------------------------------------------------------ */
@@ -171,7 +171,11 @@ app.post("/api/ingest/seed", async (c) => {
 });
 
 app.post("/api/ingest/wiki", async (c) => {
-  const body = (await c.req.json().catch(() => ({}))) as { terms?: string[] };
+  const body = (await c.req.json().catch(() => ({}))) as { terms?: string[]; all?: boolean; max?: number };
+  if (body.all) {
+    const s = await ingestWikiAll({ maxPages: body.max });
+    return c.json({ ok: true, all: true, ...s });
+  }
   const terms = body.terms?.length
     ? body.terms
     : ["ninivix", "free to play", "professions", "crafting"];
