@@ -19,6 +19,9 @@ RUN npm run build
 RUN npm prune --omit=dev --no-audit --no-fund
 
 # ---------- Etapa 2: runtime (imagen mínima) ----------
+# NOTA: se ejecuta como root a propósito. La app solo escribe en /app/data
+# (bind mount ./data del host); node_modules y dist son de solo lectura.
+# Chownear recursivamente /app en el NAS tardaba ~23 min (miles de archivos).
 FROM node:20-alpine AS runtime
 WORKDIR /app
 
@@ -33,8 +36,7 @@ COPY --from=build /app/server/dist ./server/dist
 COPY --from=build /app/frontend/dist ./frontend/dist
 
 # Directorio de la base (montado como volume)
-RUN mkdir -p /app/data && chown -R node:node /app
-USER node
+RUN mkdir -p /app/data
 
 EXPOSE 3000
 VOLUME ["/app/data"]
