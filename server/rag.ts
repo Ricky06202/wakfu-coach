@@ -332,12 +332,12 @@ async function tryExtractName(images: string[]): Promise<string | null> {
   }
 }
 
-/** Modo extractivo autocontenido: resume los fragmentos más relevantes. */
+/** Modo extractivo autocontenido: responde con las fichas y guías de la base. */
 function extractiveAnswer(query: string, hits: RagHit[], entities: Entity[]): GenerateResult {
   const lines: string[] = [];
 
   if (entities.length > 0) {
-    lines.push("Encontré la ficha oficial en la base de conocimiento:");
+    lines.push("Aquí tienes la ficha oficial que tengo registrada:");
     for (const e of entities) {
       if (e.kind === "item") {
         const fx = e.effects.map((f) => `- **${f.label}**: ${f.value}`).join("\n");
@@ -360,11 +360,7 @@ function extractiveAnswer(query: string, hits: RagHit[], entities: Entity[]): Ge
   }
 
   if (hits.length > 0) {
-    lines.push(
-      hits.length && !entities.length
-        ? `No hay un LLM conectado (OLLAMA_URL vacío), así que respondo con los fragmentos más relevantes de la base para: *${query}*.`
-        : "Contexto adicional de las guías:",
-    );
+    lines.push(entities.length ? "Y esto complementa lo que dicen las guías de la comunidad:" : "Según las guías y fichas de mi base de conocimiento:");
     for (const h of hits.slice(0, 3)) {
       const snippet = h.content.slice(0, 700);
       lines.push(`\n**${h.title}**${h.tags.length ? ` _[${h.tags.slice(0, 3).join(", ")}]_` : ""}\n${snippet}`);
@@ -375,11 +371,9 @@ function extractiveAnswer(query: string, hits: RagHit[], entities: Entity[]): Ge
     ...entities.map((e) => ({ label: e.kind === "item" ? e.name : `Receta: ${e.itemName}`, url: e.url })),
     ...hits.slice(0, 2).map((h) => ({ label: h.title, url: h.url })),
   ];
-  lines.push(
-    "\n---\n**Verifica en las fuentes:** " +
-      refs.map((r) => `[${r.label}](${r.url ?? "https://wakfu.wiki.gg"})`).join(" · ") +
-      "\n> Pista: configura `LLM_BASE_URL` + `LLM_API_KEY` + `LLM_MODEL` (con visión) para respuestas redactadas por un LLM.",
-  );
+  if (refs.length) {
+    lines.push("\n---\n**Fuentes:** " + refs.map((r) => `[${r.label}](${r.url ?? "https://wakfu.wiki.gg"})`).join(" · "));
+  }
   return { answer: lines.join("\n").replace(/\n{3,}/g, "\n\n").trim(), mode: "extractive" };
 }
 
@@ -483,18 +477,9 @@ export async function answerQuestion(
   const provider = resolveProvider();
   const hits = retrieve(query, topK);
 
-  // Charla breve / saludos: no pasa por el RAG (evita "no encontré información").
-  const smallTalk = smallTalkReply(query);
-  if (smallTalk) {
-    return {
-      answer: smallTalk,
-      mode: "extractive",
-      sources: [],
-      retrieved: [],
-      retrievedCount: 0,
-      entities: [],
-    };
-  }
+  // Charla breve / saludos: solo se responde de forma fija si NO hay LLM.
+  // Con LLM activo la conversación la lleva el modelo (más natural).
+  const smallTalk = provider === "none" ? smallTalkReply(query) : null;
 
   const sources: RagSource[] = hits.map((h) => ({
     title: h.title,
@@ -535,44 +520,49 @@ export async function answerQuestion(
     return strictAnswer(query, visionName, hits);
   }
 
-  // Sin ninguna base de conocimiento relevante.
-  if (hits.length === 0 && entities.length === 0) {
-    return {
-      answer: images.length
-        ? "Recibí tu captura, pero no hay un modelo con visión configurado para analizarla. " +
-          "Configura `LLM_BASE_URL`, `LLM_API_KEY` y `LLM_MODEL` (con visión) en el entorno, " +
-          "o prueba a escribir el nombre del objeto en el chat."
-        : "No encontré información relevante en la base de conocimiento local para esa consulta. " +
-          "Intenta reformularla o ejecuta la ingesta de la Wiki Oficial (`--wiki`). También puedes consultar https://wakfu.wiki.gg directamente.",
-      mode: "extractive",
-      sources: [],
-      retrieved: [],
-      retrievedCount: 0,
-      entities: [],
-    };
-  }
-
   const context = [formatContext(hits), entities.length ? formatEntities(entities) : ""].filter(Boolean).join("\n\n");
   let result: GenerateResult;
 
-  if (provider === "openai" || provider === "anthropic") {
+  // Sin LLM: respuestas amables para saludos, extractivas para el resto.
+  if (provider === "none") {
+    if (smallTalk) {
+      return {
+        answer: smallTalk,
+        mode: "extractive",
+        sources: [],
+        retrieved: [],
+        retrievedCount: 0,
+        entities: [],
+      };
+    }
+    if (hits.length === 0 && entities.length === 0) {
+      return {
+        answer: images.length
+          ? "Recibí tu captura, pero no hay un modelo con visión configurado para analizarla. " +
+            "Configura `LLM_BASE_URL`, `LLM_API_KEY` y `LLM_MODEL` (con visión) en el entorno, " +
+            "o prueba a escribir el nombre del objeto en el chat."
+          : "Aún no tengo información sobre eso en mis archivos (Enciclopedia Oficial y Wiki de Wakfu). " +
+            "Intenta reformular la pregunta o, si es un objeto nuevo, ejecuta la ingesta de la Wiki Oficial.",
+        mode: "extractive",
+        sources: [],
+        retrieved: [],
+        retrievedCount: 0,
+        entities: [],
+      };
+    }
+    result = extractiveAnswer(query, hits, entities);
+  } else {
+    // Con LLM: el coach conversa de verdad, incluso sin contexto (saludos, dudas generales).
     try {
-      result = await generateWithLlm(query, context, history, images);
+      result =
+        provider === "ollama"
+          ? await generateWithOllama(query, context, history, images)
+          : await generateWithLlm(query, context, history, images);
       if (!result.answer) throw new Error("respuesta vacía del modelo");
     } catch (err) {
       console.warn("[rag] fallo de LLM, degradando a modo extractivo:", (err as Error).message);
       result = extractiveAnswer(query, hits, entities);
     }
-  } else if (provider === "ollama") {
-    try {
-      result = await generateWithOllama(query, context, history, images);
-      if (!result.answer) throw new Error("respuesta vacía del modelo");
-    } catch (err) {
-      console.warn("[rag] fallo de Ollama, degradando a modo extractivo:", (err as Error).message);
-      result = extractiveAnswer(query, hits, entities);
-    }
-  } else {
-    result = extractiveAnswer(query, hits, entities);
   }
 
   return { answer: result.answer, mode: result.mode, sources, retrieved: hits, retrievedCount: hits.length, entities };
