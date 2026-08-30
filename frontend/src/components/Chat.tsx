@@ -99,6 +99,7 @@ export function Chat() {
   const [ingesting, setIngesting] = useState(false);
   const [profile, setProfile] = useState<ProfileItem[]>([]);
   const [showProfile, setShowProfile] = useState(false);
+  const [llmOn, setLlmOn] = useState<boolean | null>(null);
 
   // Carga del historial persistido y del id de sesión (solo en cliente, sin
   // mismatch de hidratación en el SSR de Astro).
@@ -133,8 +134,9 @@ export function Chat() {
     try {
       const res = await fetch(`${API_BASE}/api/health`);
       if (res.ok) {
-        const h = (await res.json()) as { db?: { chunks?: number } };
+        const h = (await res.json()) as { db?: { chunks?: number }; rag?: { llmConfigured?: boolean } };
         setDbChunks(h.db?.chunks ?? null);
+        setLlmOn(h.rag?.llmConfigured ?? null);
       }
     } catch {
       /* API no disponible */
@@ -309,6 +311,14 @@ export function Chat() {
 
       {/* Barra de datos: estado de la base + carga desde fuentes oficiales */}
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 border-b border-edge bg-panel/60 px-4 py-2 font-mono text-[11px]">
+        {llmOn === false && (
+          <span
+            className="flex items-center gap-1.5 rounded border border-ember/50 bg-ember/10 px-2 py-0.5 uppercase tracking-wider text-ember"
+            title="Sin LLM configurado (LLM_BASE_URL + LLM_API_KEY en el .env). El coach solo puede 'informar', no recomendar ni conversar."
+          >
+            sin llm · solo informa
+          </span>
+        )}
         <span className="flex items-center gap-1.5 text-muted">
           <span className={`h-1.5 w-1.5 rounded-full ${dbChunks === null ? "bg-ember" : "bg-teal"}`} />
           base: <span className="text-paper">{dbChunks ?? "?"}</span> fragmentos

@@ -253,29 +253,39 @@ export interface ChunkRow {
 
 export type QueryMatch = ChunkRow & { score: number };
 
-/** Escape de operadores FTS5: tokens limpios (sin acentos/acentos) unidos con OR. */
-export function escapeFts(input: string): string {
-  const tokens = normalize(input)
-    .replace(/[^a-z0-9\s]/g, " ")
-    .split(/\s+/)
-    .filter((t) => t.length >= 2)
-    .slice(0, 12);
-  return tokens.map((tok) => `"${tok}"*`).join(" OR ");
-}
-
 export function normalize(text: string): string {
   return text.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+}
+
+/** Stopwords en español/comunes que no aportan relevancia a la búsqueda. */
+const STOPWORDS = new Set([
+  "de", "la", "el", "los", "las", "del", "al", "que", "para", "con", "sin", "por",
+  "como", "una", "un", "unas", "unos", "y", "o", "a", "en", "mi", "tu", "su", "es",
+  "me", "te", "se", "lo", "ya", "mas", "más", "si", "no", "soy", "eres", "cuando",
+  "esto", "eso", "tengo", "estoy", "quiero", "quiere", "dime", "puedes", "puedo",
+]);
+
+/** Tokens con significado (descarta stopwords y muy cortos). */
+function meaningfulTokens(text: string, minLen = 3): string[] {
+  return text
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9\s]/g, " ")
+    .split(/\s+/)
+    .filter((t) => t.length >= minLen && !STOPWORDS.has(t));
+}
+
+/** Escape de operadores FTS5: tokens con significado unidos con OR. */
+export function escapeFts(input: string): string {
+  const tokens = meaningfulTokens(input, 2).slice(0, 12);
+  return tokens.map((tok) => `"${tok}"*`).join(" OR ");
 }
 
 /** Búsqueda hibrida: FTS5 BM25 (OR de tokens, ranking de relevancia) + barrido léxico. */
 export function searchChunks(query: string, limit: number): QueryMatch[] {
   const ftsQuery = escapeFts(query);
-  const nq = normalize(query);
-  const tokens = nq
-    .replace(/[^a-z0-9\s]/g, " ")
-    .split(/\s+/)
-    .filter((t) => t.length >= 3)
-    .slice(0, 8);
+  const tokens = meaningfulTokens(query, 4).slice(0, 8);
 
   const hits: QueryMatch[] = [];
 
@@ -342,8 +352,16 @@ export function searchChunks(query: string, limit: number): QueryMatch[] {
     };
   });
 
-  scored.sort((a, b) => b.score - a.score);
-  return scored.slice(0, limit);
+  // Filtra ruido: sin tokens con significado, o sin ningún solape real con la
+  // consulta (evita que bm25/OR arrastre trozos irrelevantes como cabeceras).
+  const filtered = tokens.length
+    ? scored.filter((s) => {
+        const nc = normalize(`${s.title} ${s.content}`);
+        return tokens.some((t) => nc.includes(t));
+      })
+    : scored;
+  filtered.sort((a, b) => b.score - a.score);
+  return filtered.slice(0, limit);
 }
 
 /* ------------------------------------------------------------------ */

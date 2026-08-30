@@ -125,15 +125,19 @@ const chatSchema = z.object({
     .default([]),
 });
 
-app.get("/api/health", (c) =>
-  c.json({
+app.get("/api/health", (c) => {
+  const llmConfigured = !!(env.OLLAMA_URL || (env.LLM_BASE_URL && env.LLM_API_KEY));
+  return c.json({
     ok: true,
     service: "wakfu-coach",
     version: "1.0.0",
     db: { chunks: chunkCount() },
-    rag: { mode: env.OLLAMA_URL ? `ollama:${env.OLLAMA_MODEL}` : "extractive" },
-  }),
-);
+    rag: {
+      mode: llmConfigured ? (env.OLLAMA_URL ? `ollama:${env.OLLAMA_MODEL}` : `llm:${env.LLM_MODEL}`) : "extractive",
+      llmConfigured,
+    },
+  });
+});
 
 app.get("/api/search", (c) => {
   const q = c.req.query("q")?.trim();

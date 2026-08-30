@@ -489,12 +489,28 @@ export async function answerQuestion(
   const profile = (opts.profile ?? []).filter((p) => p.key.trim() && p.value.trim());
   const provider = resolveProvider();
 
-  // La recuperación se enriquece con el perfil (clase, elemento, nivel…) para
-  // que el coach priorice guías relevantes a la jugadora.
-  const profileTerms = profile
-    .map((p) => p.value)
-    .filter((v) => v.length >= 2 && v.length <= 40);
-  const hits = retrieve([query, ...profileTerms].join(" "), topK);
+  // Recuperación sobre la consulta REAL (el perfil NO se inyecta en el query,
+  // se usa como boost posterior para no contaminar la relevancia).
+  const hits = retrieve(query, topK);
+
+  // Boost posterior: si un fragmento menciona la clase/elemento/oficios del
+  // perfil, sube su relevancia para el consejo de la jugadora.
+  const profileBoostTerms = profile
+    .filter((p) => ["clase", "elemento", "oficios", "zona"].includes(p.key))
+    .map((p) => normalizeName(p.value))
+    .filter((v) => v.length >= 3);
+  if (profileBoostTerms.length) {
+    for (const h of hits) {
+      const hay = normalizeName(`${h.title} ${h.content}`);
+      for (const v of profileBoostTerms) {
+        if (hay.includes(v)) {
+          h.score += 1.5;
+          break;
+        }
+      }
+    }
+    hits.sort((a, b) => b.score - a.score);
+  }
 
   // Charla breve / saludos: solo se responde de forma fija si NO hay LLM.
   // Con LLM activo la conversación la lleva el modelo (más natural).
