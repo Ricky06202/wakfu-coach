@@ -62,15 +62,21 @@ export interface ChatResponse {
   entities: Entity[];
 }
 
+export interface ProfileItem {
+  key: string;
+  value: string;
+}
+
 export const API_BASE: string = (import.meta.env.PUBLIC_API_BASE as string | undefined) ?? "";
 
-export async function chatRequest(messages: ChatMessage[], images: string[] = []): Promise<ChatResponse> {
+export async function chatRequest(messages: ChatMessage[], images: string[] = [], profile: ProfileItem[] = []): Promise<ChatResponse> {
   const res = await fetch(`${API_BASE}/api/chat`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
       messages: messages.map(({ role, content }) => ({ role, content })),
       images,
+      profile,
     }),
   });
   if (!res.ok) {

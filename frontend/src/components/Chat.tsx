@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ChangeEvent, type ClipboardEvent } from "react";
-import { API_BASE, chatRequest } from "../lib/api.ts";
+import { API_BASE, chatRequest, type ProfileItem } from "../lib/api.ts";
 import type { ChatMessage, ChatSource } from "../lib/api.ts";
 import { Markdown } from "../lib/markdown.tsx";
 import { EntityCards } from "./Cards.tsx";
@@ -20,6 +20,9 @@ const SOURCE_LABEL: Record<string, string> = {
 
 const STORAGE_KEY = "wakfu-coach:chat:v1";
 const SESSION_KEY = "wakfu-coach:session";
+const PROFILE_KEY = "wakfu-coach:profile";
+
+const PROFILE_FIELDS = ["clase", "nivel", "elemento", "zona", "objetivo"] as const;
 
 const MAX_IMAGES = 2;
 const MAX_IMAGE_MB = 8;
@@ -48,6 +51,17 @@ function sessionId(): string {
   }
 }
 
+function loadProfile(): ProfileItem[] {
+  try {
+    const raw = localStorage.getItem(PROFILE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as unknown;
+    return Array.isArray(parsed) ? (parsed as ProfileItem[]) : [];
+  } catch {
+    return [];
+  }
+}
+
 export function Chat() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
@@ -61,15 +75,35 @@ export function Chat() {
   const [dbChunks, setDbChunks] = useState<number | null>(null);
   const [ingestMsg, setIngestMsg] = useState<string | null>(null);
   const [ingesting, setIngesting] = useState(false);
+  const [profile, setProfile] = useState<ProfileItem[]>([]);
+  const [showProfile, setShowProfile] = useState(false);
 
   // Carga del historial persistido y del id de sesión (solo en cliente, sin
   // mismatch de hidratación en el SSR de Astro).
   useEffect(() => {
     setMessages(loadChat());
     setSession(sessionId());
+    setProfile(loadProfile());
     hydrated.current = true;
     void refreshStats();
   }, []);
+
+  useEffect(() => {
+    if (!hydrated.current) return;
+    try {
+      localStorage.setItem(PROFILE_KEY, JSON.stringify(profile));
+    } catch {
+      /* ignore */
+    }
+  }, [profile]);
+
+  function setProfileField(field: string, value: string) {
+    setProfile((prev) => {
+      const next = prev.filter((p) => p.key !== field);
+      if (value.trim()) next.push({ key: field, value: value.trim() });
+      return next;
+    });
+  }
 
   async function refreshStats() {
     try {
@@ -86,7 +120,7 @@ export function Chat() {
   async function runIngest(kind: "wiki" | "seed" | "encyclopedia", all = false) {
     if (ingesting) return;
     setIngesting(true);
-    setIngestMsg(all ? "cargando wiki completo (puede tardar varios minutos)…" : `cargando ${kind}…`);
+    setIngestMsg(all ? "cargando TODA la wiki (puede tardar horas)…" : `cargando ${kind}…`);
     setError(null);
     try {
       const res = await fetch(`${API_BASE}/api/ingest/${kind}`, {
@@ -153,7 +187,7 @@ export function Chat() {
     setBusy(true);
     setError(null);
     try {
-      const res = await chatRequest(next, attached);
+      const res = await chatRequest(next, attached, profile);
       setMessages([
         ...next,
         { role: "assistant", content: res.answer, sources: res.sources, mode: res.mode, entities: res.entities },
@@ -271,7 +305,7 @@ export function Chat() {
         <button
           onClick={() => void runIngest("wiki", true)}
           disabled={ingesting}
-          title="Ingesta masiva: todas las páginas de la wiki (límite configurable)"
+          title="Ingesta masiva: TODA la wiki de wakfu.wiki.gg (puede tardar horas; recomendado desde CLI con nohup)"
           className="rounded border border-ember/40 px-1.5 py-0.5 uppercase tracking-wider text-muted transition hover:border-ember/70 hover:text-ember disabled:opacity-40"
         >
           + wiki todo
@@ -284,12 +318,41 @@ export function Chat() {
         >
           + enciclopedia
         </button>
+        <button
+          onClick={() => setShowProfile((v) => !v)}
+          className={`rounded border px-1.5 py-0.5 uppercase tracking-wider transition ${showProfile ? "border-teal/60 text-teal" : "border-edge text-muted hover:border-teal/50 hover:text-teal"}`}
+          title="Tu perfil de juego (nivel, clase, elemento…) — el coach lo usa para adaptar el consejo"
+        >
+          perfil
+        </button>
         {ingestMsg && (
           <span className={`ml-auto truncate text-right ${ingestMsg.startsWith("no") || ingestMsg.startsWith("error") ? "text-ember" : "text-teal"}`}>
             {ingestMsg}
           </span>
         )}
       </div>
+
+      {/* Perfil de la jugadora */}
+      {showProfile && (
+        <div className="border-b border-edge bg-panel/60 px-4 py-3">
+          <p className="mb-2 font-mono text-[10px] uppercase tracking-widest text-muted">
+            Perfil de la jugadora — el coach adapta todo el consejo a esto y lo recuerda entre mensajes
+          </p>
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+            {PROFILE_FIELDS.map((f) => (
+              <label key={f} className="block">
+                <span className="mb-0.5 block font-mono text-[10px] uppercase tracking-wider text-muted">{f}</span>
+                <input
+                  value={profile.find((p) => p.key === f)?.value ?? ""}
+                  onChange={(e) => setProfileField(f, e.target.value)}
+                  className="w-full rounded border border-edge bg-panel-2 px-2 py-1.5 font-mono text-xs text-paper outline-none transition focus:border-teal/60"
+                  placeholder={f === "objetivo" ? "p.ej. subir a nivel 60" : f === "zona" ? "p.ej. Amakna" : ""}
+                />
+              </label>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Mensajes */}
       <div ref={scrollRef} className="flex-1 space-y-4 overflow-y-auto px-4 py-4">

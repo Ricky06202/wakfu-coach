@@ -112,6 +112,17 @@ const chatSchema = z.object({
     .transform((list) =>
       (list ?? []).filter((img) => /^data:image\/(png|jpe?g|webp|gif);base64,/i.test(img)),
     ),
+  // Perfil de la jugadora (nivel, clase, elemento, zona, objetivo…) que el coach adapta.
+  profile: z
+    .array(
+      z.object({
+        key: z.string().trim().min(1).max(40),
+        value: z.string().trim().min(1).max(200),
+      }),
+    )
+    .max(12)
+    .optional()
+    .default([]),
 });
 
 app.get("/api/health", (c) =>
@@ -148,7 +159,7 @@ app.post("/api/chat", zValidator("json", chatSchema), async (c) => {
     .filter((m) => m.role === "user" || m.role === "assistant")
     .map((m) => ({ role: m.role as "user" | "assistant", content: m.content }));
 
-  const result = await answerQuestion(query, history, body.topK, { images: body.images });
+  const result = await answerQuestion(query, history, body.topK, { images: body.images, profile: body.profile });
 
   saveChat([
     ...messages.map((m) => ({ role: m.role, content: m.content })),

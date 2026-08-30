@@ -226,25 +226,37 @@ function formatEntities(entities: Entity[]): string {
 /* Generación                                                          */
 /* ------------------------------------------------------------------ */
 
-const SYSTEM_PROMPT = `Eres Wakfu Coach, un asistente RAG especializado en el MMORPG Wakfu.
-Tu jugadora es una cuenta FREE-TO-PLAY (sin abono) de clase NINIVIX.
-Responde SIEMPRE en español, de forma concisa y práctica.
-Usa EXCLUSIVAMENTE el contexto entre los delimitadores <contexto> y </contexto>,
-incluidas las fichas/recetas oficiales que ahí aparezcan.
-Si la jugadora pregunta por un objeto o receta concreto y NO está en el contexto,
-responde literalmente: "No tengo registrado este objeto en los archivos oficiales."
-y sugiere la Wiki Oficial (https://wakfu.wiki.gg) o la Enciclopedia Oficial.
-Si el contexto no responde la pregunta, dilo claramente.
-Cita las fuentes numeradas que uses, al final, como "[1] Título (url)".
-No inventes cifras, estadísticas, ingredientes ni mecánicas: si no está en el contexto, no lo afirmes.`;
+export type PlayerProfile = Array<{ key: string; value: string }>;
 
-const VISION_SYSTEM_PROMPT = `${SYSTEM_PROMPT}
+/** Prompt de COACH proactivo: adapta el consejo al perfil y pide contexto si falta. */
+function buildSystemPrompt(profile: PlayerProfile, images: boolean): string {
+  let sys = `Eres Wakfu Coach, un entrenador personal (coach) del MMORPG Wakfu para una jugadora en modo free-to-play (sin abono).
 
-La jugadora adjunta CAPTURAS DE PANTALLA del juego (fichas de objeto, recetas, inventario).
+Tu rol es COACHEAR, no solo informar:
+- Da instrucciones PRÁCTICAS paso a paso (qué hacer ahora y en qué orden).
+- Si te falta contexto (nivel, elemento, equipo, ubicación, objetivo o lo que la jugadora tiene/hace), PREGÚNTALO de forma breve en lugar de adivinar.
+- Interpreta frases como "mira, tengo esto", "estoy aquí", "me piden esto": la jugadora describe su estado y quiere saber cómo seguir.
+- Usa TU conocimiento del juego para orientar, pero distingue SIEMPRE entre:
+  1) datos VERIFICADOS (los del <contexto>: stats, recetas, precios exactos) y
+  2) orientación general (si no está en el contexto, márcalo como "según mi experiencia").
+- NUNCA inventes cifras exactas, estadísticas, ingredientes ni recetas que no estén en el <contexto>.
+- Si la jugadora pregunta por un objeto o receta concreto y NO está en el contexto, responde literalmente: "No tengo registrado este objeto en los archivos oficiales."
+- Responde SIEMPRE en español, conciso, con pasos o viñetas cuando ayude, y con tono de entrenador (firme pero cercano).
+- Si usaste fuentes del contexto, cítalas al final como "[1] Título (url)".`;
+  if (profile.length) {
+    sys += `\n\nPERFIL DE LA JUGADORA (adapta TODO el consejo a esto):\n${profile
+      .map((p) => `- ${p.key}: ${p.value}`)
+      .join("\n")}`;
+  }
+  if (images) {
+    sys += `\n\nLa jugadora adjunta CAPTURAS DE PANTALLA del juego (fichas de objeto, recetas, inventario).
 Analiza cada imagen con cuidado: lee el NOMBRE EXACTO del objeto y sus estadísticas.
 Verifica SIEMPRE contra los archivos oficiales del contexto: si el objeto de la imagen NO está
 registrado, responde literalmente "No tengo registrado este objeto en los archivos oficiales."
 Si hay discrepancias entre la imagen y los archivos (versiones, parches), señálalo en vez de inventar.`;
+  }
+  return sys;
+}
 
 const EXTRACT_PROMPT = `Identifica el objeto, recurso o receta de Wakfu en la(s) imagen(es) adjunta(s).
 Responde SOLO con el nombre exacto del objeto en una línea, sin comillas, sin números ni explicaciones.
@@ -273,12 +285,12 @@ export interface GenerateResult {
   mode: Mode;
 }
 
-async function generateWithOllama(query: string, context: string, history: Array<{ role: string; content: string }>, images: string[] = []): Promise<GenerateResult> {
+async function generateWithOllama(query: string, context: string, history: Array<{ role: string; content: string }>, profile: PlayerProfile, images: string[] = []): Promise<GenerateResult> {
   const prompt = buildPrompt(query, context, history);
   const body: Record<string, unknown> = {
     model: env.OLLAMA_MODEL,
     prompt,
-    system: SYSTEM_PROMPT,
+    system: buildSystemPrompt(profile, images.length > 0),
     stream: false,
     options: {
       temperature: env.OLLAMA_TEMPERATURE,
@@ -301,13 +313,12 @@ async function generateWithOllama(query: string, context: string, history: Array
   return { answer: data.response?.trim() ?? "", mode: "llm" };
 }
 
-async function generateWithLlm(query: string, context: string, history: Array<{ role: string; content: string }>, images: string[] = []): Promise<GenerateResult> {
-  const system = images.length ? VISION_SYSTEM_PROMPT : SYSTEM_PROMPT;
+async function generateWithLlm(query: string, context: string, history: Array<{ role: string; content: string }>, profile: PlayerProfile, images: string[] = []): Promise<GenerateResult> {
   const chat: LlmMessage[] = history
     .slice(-6)
     .map((m) => ({ role: m.role as "user" | "assistant", content: m.content }));
   const messages: LlmMessage[] = [
-    { role: "system", content: system },
+    { role: "system", content: buildSystemPrompt(profile, images.length > 0) },
     ...chat,
     buildUserMessage(buildPrompt(query, context, history), images),
   ];
@@ -465,6 +476,7 @@ function dedupeEntities(list: Entity[]): Entity[] {
 
 export interface AnswerOptions {
   images?: string[];
+  profile?: PlayerProfile;
 }
 
 export async function answerQuestion(
@@ -474,8 +486,15 @@ export async function answerQuestion(
   opts: AnswerOptions = {},
 ): Promise<RagAnswer> {
   const images = opts.images ?? [];
+  const profile = (opts.profile ?? []).filter((p) => p.key.trim() && p.value.trim());
   const provider = resolveProvider();
-  const hits = retrieve(query, topK);
+
+  // La recuperación se enriquece con el perfil (clase, elemento, nivel…) para
+  // que el coach priorice guías relevantes a la jugadora.
+  const profileTerms = profile
+    .map((p) => p.value)
+    .filter((v) => v.length >= 2 && v.length <= 40);
+  const hits = retrieve([query, ...profileTerms].join(" "), topK);
 
   // Charla breve / saludos: solo se responde de forma fija si NO hay LLM.
   // Con LLM activo la conversación la lleva el modelo (más natural).
@@ -556,8 +575,8 @@ export async function answerQuestion(
     try {
       result =
         provider === "ollama"
-          ? await generateWithOllama(query, context, history, images)
-          : await generateWithLlm(query, context, history, images);
+          ? await generateWithOllama(query, context, history, profile, images)
+          : await generateWithLlm(query, context, history, profile, images);
       if (!result.answer) throw new Error("respuesta vacía del modelo");
     } catch (err) {
       console.warn("[rag] fallo de LLM, degradando a modo extractivo:", (err as Error).message);
