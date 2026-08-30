@@ -172,9 +172,11 @@ app.post("/api/ingest/seed", async (c) => {
 
 app.post("/api/ingest/wiki", async (c) => {
   const body = (await c.req.json().catch(() => ({}))) as { terms?: string[] };
-  const terms = body.terms?.length ? body.terms : ["ninivix", "free to play"];
+  const terms = body.terms?.length
+    ? body.terms
+    : ["ninivix", "free to play", "professions", "crafting"];
   const s = await ingestWikiTerms(terms);
-  return c.json({ ok: true, ...s });
+  return c.json({ ok: true, ...s, terms });
 });
 
 app.post("/api/ingest/encyclopedia", async (c) => {

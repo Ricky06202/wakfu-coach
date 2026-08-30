@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState, type ChangeEvent } from "react";
-import { chatRequest } from "../lib/api.ts";
+import { useEffect, useRef, useState, type ChangeEvent, type ClipboardEvent } from "react";
+import { API_BASE, chatRequest } from "../lib/api.ts";
 import type { ChatMessage, ChatSource } from "../lib/api.ts";
 import { Markdown } from "../lib/markdown.tsx";
 import { EntityCards } from "./Cards.tsx";
@@ -58,6 +58,9 @@ export function Chat() {
   const hydrated = useRef(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [images, setImages] = useState<string[]>([]);
+  const [dbChunks, setDbChunks] = useState<number | null>(null);
+  const [ingestMsg, setIngestMsg] = useState<string | null>(null);
+  const [ingesting, setIngesting] = useState(false);
 
   // Carga del historial persistido y del id de sesión (solo en cliente, sin
   // mismatch de hidratación en el SSR de Astro).
@@ -65,7 +68,47 @@ export function Chat() {
     setMessages(loadChat());
     setSession(sessionId());
     hydrated.current = true;
+    void refreshStats();
   }, []);
+
+  async function refreshStats() {
+    try {
+      const res = await fetch(`${API_BASE}/api/health`);
+      if (res.ok) {
+        const h = (await res.json()) as { db?: { chunks?: number } };
+        setDbChunks(h.db?.chunks ?? null);
+      }
+    } catch {
+      /* API no disponible */
+    }
+  }
+
+  async function runIngest(kind: "wiki" | "seed" | "encyclopedia") {
+    if (ingesting) return;
+    setIngesting(true);
+    setIngestMsg(`cargando ${kind}…`);
+    setError(null);
+    try {
+      const res = await fetch(`${API_BASE}/api/ingest/${kind}`, { method: "POST" });
+      const data = (await res.json()) as { ok?: boolean; guides?: number; pages?: number; items?: number; chunks?: number };
+      if (!res.ok || !data.ok) {
+        setIngestMsg(`error al cargar ${kind}`);
+        return;
+      }
+      setIngestMsg(
+        kind === "seed"
+          ? `seed cargado: ${data.chunks ?? "?"} fragmentos nuevos`
+          : kind === "wiki"
+            ? `wiki cargado: ${data.guides ?? data.pages ?? "?"} guías, ${data.chunks ?? "?"} fragmentos`
+            : `enciclopedia cargada: ${data.items ?? "?"} objetos`,
+      );
+      await refreshStats();
+    } catch {
+      setIngestMsg(`no se pudo conectar con la API para cargar ${kind}`);
+    } finally {
+      setIngesting(false);
+    }
+  }
 
   // Persistencia de la sesión: el historial sobrevive a recargas de la página.
   useEffect(() => {
@@ -107,6 +150,12 @@ export function Chat() {
 
   function onPickImages(e: ChangeEvent<HTMLInputElement>) {
     const files = Array.from(e.target.files ?? []);
+    addImagesFromFiles(files);
+    e.target.value = "";
+  }
+
+  /** Añade imágenes (data URLs) desde archivos o desde el portapapeles. */
+  function addImagesFromFiles(files: File[]) {
     const slots = MAX_IMAGES - images.length;
     files.slice(0, slots).forEach((file) => {
       if (!file.type.startsWith("image/")) return;
@@ -120,7 +169,19 @@ export function Chat() {
       };
       reader.readAsDataURL(file);
     });
-    e.target.value = "";
+  }
+
+  /** Pega capturas directamente del portapapeles (Ctrl+V) en el cuadro de texto. */
+  function onPaste(e: ClipboardEvent<HTMLTextAreaElement>) {
+    const items = Array.from(e.clipboardData?.items ?? []);
+    const files = items
+      .filter((it) => it.type.startsWith("image/"))
+      .map((it) => it.getAsFile())
+      .filter((f): f is File => f !== null);
+    if (files.length) {
+      e.preventDefault(); // evita pegar el nombre binario de la imagen como texto
+      addImagesFromFiles(files);
+    }
   }
 
   function clearChat() {
@@ -166,6 +227,43 @@ export function Chat() {
             </svg>
           </button>
         </div>
+      </div>
+
+      {/* Barra de datos: estado de la base + carga desde fuentes oficiales */}
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 border-b border-edge bg-panel/60 px-4 py-2 font-mono text-[11px]">
+        <span className="flex items-center gap-1.5 text-muted">
+          <span className={`h-1.5 w-1.5 rounded-full ${dbChunks === null ? "bg-ember" : "bg-teal"}`} />
+          base: <span className="text-paper">{dbChunks ?? "?"}</span> fragmentos
+        </span>
+        <span className="text-edge">|</span>
+        <button
+          onClick={() => void runIngest("seed")}
+          disabled={ingesting}
+          className="rounded border border-edge px-1.5 py-0.5 uppercase tracking-wider text-muted transition hover:border-teal/50 hover:text-teal disabled:opacity-40"
+        >
+          + seed
+        </button>
+        <button
+          onClick={() => void runIngest("wiki")}
+          disabled={ingesting}
+          title="Descarga guías de wakfu.wiki.gg"
+          className="rounded border border-edge px-1.5 py-0.5 uppercase tracking-wider text-muted transition hover:border-teal/50 hover:text-teal disabled:opacity-40"
+        >
+          + wiki
+        </button>
+        <button
+          onClick={() => void runIngest("encyclopedia")}
+          disabled={ingesting}
+          title="Escanea wakfu.com/es/mmorpg/enciclopedia (best-effort)"
+          className="rounded border border-edge px-1.5 py-0.5 uppercase tracking-wider text-muted transition hover:border-teal/50 hover:text-teal disabled:opacity-40"
+        >
+          + enciclopedia
+        </button>
+        {ingestMsg && (
+          <span className={`ml-auto truncate text-right ${ingestMsg.startsWith("no") || ingestMsg.startsWith("error") ? "text-ember" : "text-teal"}`}>
+            {ingestMsg}
+          </span>
+        )}
       </div>
 
       {/* Mensajes */}
@@ -315,8 +413,9 @@ export function Chat() {
                 void send(input);
               }
             }}
+            onPaste={onPaste}
             rows={1}
-            placeholder="consulta ›  (Enter envía · Shift+Enter salto de línea)"
+            placeholder="consulta ›  (Enter envía · Shift+Enter salto · Ctrl+V pega captura)"
             className="max-h-40 flex-1 resize-none rounded-md border border-edge bg-panel-2 px-3.5 py-2.5 font-mono text-sm text-paper outline-none transition placeholder:text-muted/60 focus:border-teal/60"
           />
           <input ref={fileInputRef} type="file" accept="image/png,image/jpeg,image/webp,image/gif" multiple hidden onChange={onPickImages} />
