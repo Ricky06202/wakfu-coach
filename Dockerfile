@@ -30,8 +30,12 @@ ENV NODE_ENV=production \
     DB_PATH=/app/data/wakfu.db \
     AUTO_SEED=true
 
-# Solo lo necesario para ejecutar
+# Solo lo necesario para ejecutar.
+# OJO: con workspaces algunas dependencias NO se hoistean (p.ej. drizzle-orm,
+# por conflicto de versión con drizzle-kit) y quedan en server/node_modules.
+# Hay que copiar ambos node_modules o el runtime falla con ERR_MODULE_NOT_FOUND.
 COPY --from=build /app/node_modules ./node_modules
+COPY --from=build /app/server/node_modules ./server/node_modules
 COPY --from=build /app/server/dist ./server/dist
 COPY --from=build /app/frontend/dist ./frontend/dist
 
