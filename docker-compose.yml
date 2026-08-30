@@ -23,10 +23,13 @@ services:
       # OLLAMA_URL: http://host.docker.internal:11434
       # OLLAMA_MODEL: llama3.2:3b
       # --- LLM OpenAI-compatible con VISIÓN (p.ej. deepseek-v4-flash-vision-exp).
-      # La API key NO va en el repo: úsala vía .env del host (env_file) o aquí con sed. ---
-      # LLM_BASE_URL: https://api.tu-proveedor.example/v1
-      # LLM_API_KEY: ${LLM_API_KEY:-}
-      # LLM_MODEL: deepseek-v4-flash-vision-exp
+      # La API key va SOLO en el archivo .env del host (compose lo lee automáticamente).
+      # Vacíos = modo extractivo sin LLM. ---
+      LLM_PROVIDER: ${LLM_PROVIDER:-auto}
+      LLM_BASE_URL: ${LLM_BASE_URL:-}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_MODEL: ${LLM_MODEL:-deepseek-v4-flash-vision-exp}
+      LLM_MAX_IMAGES: ${LLM_MAX_IMAGES:-2}
       # --- Orígenes CORS permitidos (separados por coma). Vacío = cualquier origen local ---
       # ALLOWED_ORIGINS: http://192.168.1.20:3000
     healthcheck:
