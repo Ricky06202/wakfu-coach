@@ -1,0 +1,32 @@
+---
+import "../styles/global.css";
+import { Chat } from "../components/Chat.tsx";
+---
+
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content="Wakfu Coach: asistente RAG local para Wakfu, optimizado para cuentas free-to-play y la clase Ninivix." />
+    <meta name="theme-color" content="#0b0f14" />
+    <title>Wakfu Coach</title>
+  </head>
+  <body>
+    <header class="mx-auto flex w-full max-w-4xl items-center gap-2 px-4 py-5">
+      <h1 class="font-mono text-sm font-bold uppercase tracking-[0.25em] text-paper">
+        Wakfu<span class="text-teal">/Coach</span>
+      </h1>
+      <p class="font-mono text-xs text-muted">· consola táctica · enciclopedia + wiki · rag local</p>
+    </header>
+
+    <main class="px-4 pb-6">
+      <Chat client:load />
+    </main>
+
+    <footer class="mx-auto max-w-4xl px-4 pb-6 text-center font-mono text-[11px] text-muted">
+      Fuentes: Enciclopedia Oficial (wakfu.com) y Wiki Oficial (wakfu.wiki.gg) ·
+      Respuestas estrictas contra alucinaciones · Proyecto educativo no afiliado a Ankama.
+    </footer>
+  </body>
+</html>

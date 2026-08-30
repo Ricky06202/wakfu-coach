@@ -1,0 +1,25 @@
+{
+  "name": "wakfu-coach",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Asistente RAG y coach personalizado para Wakfu (cuenta free-to-play, foco Ninivix). Hono + Drizzle/SQLite + Astro + Docker.",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "workspaces": [
+    "server",
+    "frontend"
+  ],
+  "scripts": {
+    "dev": "concurrently -n api,web -c blue,green \"npm run dev -w server\" \"npm run dev -w frontend\"",
+    "build": "npm run build -w server && npm run build -w frontend",
+    "start": "npm run start -w server",
+    "ingest": "npm run ingest -w server",
+    "check": "npm run check -w server && npm run check -w frontend",
+    "clean": "rm -rf server/dist frontend/dist"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.0"
+  }
+}

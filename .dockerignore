@@ -1,0 +1,11 @@
+node_modules
+server/dist
+frontend/dist
+frontend/.astro
+data/*.db
+data/*.db-*
+.git
+.gitignore
+*.log
+.env
+.env.local

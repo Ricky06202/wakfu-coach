@@ -1,0 +1,18 @@
+# Dependencies
+node_modules/
+
+# Builds
+server/dist/
+frontend/dist/
+frontend/.astro/
+
+# SQLite (persistencia local fuera del repo; en Docker vive en el volumen ./data)
+data/*.db
+data/*.db-*
+data/*.sqlite*
+
+# Logs / env
+*.log
+.env
+.env.local
+.DS_Store

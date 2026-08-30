@@ -1,0 +1,41 @@
+name: wakfu-coach
+
+services:
+  wakfu-coach:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: wakfu-coach:latest
+    container_name: wakfu-coach
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    volumes:
+      # Persistencia de SQLite en el host (./data/wakfu.db)
+      - ./data:/app/data
+    environment:
+      NODE_ENV: production
+      PORT: "3000"
+      DB_PATH: /app/data/wakfu.db
+      # Siembra el dataset de muestra la primera vez que la base está vacía
+      AUTO_SEED: "true"
+      # --- LLM local opcional (Ollama). Descomenta si tienes un contenedor Ollama ---
+      # OLLAMA_URL: http://host.docker.internal:11434
+      # OLLAMA_MODEL: llama3.2:3b
+      # --- LLM OpenAI-compatible con VISIÓN (p.ej. deepseek-v4-flash-vision-exp).
+      # La API key NO va en el repo: úsala vía .env del host (env_file) o aquí con sed. ---
+      # LLM_BASE_URL: https://api.tu-proveedor.example/v1
+      # LLM_API_KEY: ${LLM_API_KEY:-}
+      # LLM_MODEL: deepseek-v4-flash-vision-exp
+      # --- Orígenes CORS permitidos (separados por coma). Vacío = cualquier origen local ---
+      # ALLOWED_ORIGINS: http://192.168.1.20:3000
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - fetch('http://localhost:3000/api/health').then(r=>{if(!r.ok)process.exit(1);console.log('ok')}).catch(()=>process.exit(1))
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
