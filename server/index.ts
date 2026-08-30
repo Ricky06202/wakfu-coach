@@ -16,6 +16,7 @@ import { env } from "./env.js";
 import { loadSeed } from "./ingest/seed.js";
 import { ingestWikiAll, ingestWikiTerms } from "./ingest/wiki.js";
 import { ingestEncyclopedia } from "./ingest/encyclopedia.js";
+import { ingestCargo } from "./ingest/cargo.js";
 
 /* ------------------------------------------------------------------ */
 /* Arranque de la base + siembra automática                            */
@@ -200,6 +201,13 @@ app.post("/api/ingest/wiki", async (c) => {
 
 app.post("/api/ingest/encyclopedia", async (c) => {
   const s = await ingestEncyclopedia();
+  return c.json({ ok: true, ...s });
+});
+
+// Ingesta estructurada desde la base Cargo de la wiki (items + recetas con stats)
+app.post("/api/ingest/cargo", async (c) => {
+  const body = (await c.req.json().catch(() => ({}))) as { max?: number };
+  const s = await ingestCargo({ max: body.max ?? 0 });
   return c.json({ ok: true, ...s });
 });
 

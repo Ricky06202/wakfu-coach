@@ -129,14 +129,16 @@ npm run ingest     # ejecuta la ingesta manual (ver flags abajo)
 
 ```bash
 npm run ingest -- --seed            # dataset de muestra (determinista, offline)
+npm run ingest -- --cargo [--max N] # TODOS los items con stats + recetas (base Cargo de la wiki, ~5.500 items)
 npm run ingest -- --wiki ninivix    # guías de la Wiki Oficial (wakfu.wiki.gg)
+npm run ingest -- --wiki --all      # todas las páginas de la wiki (tarda horas)
 npm run ingest -- --encyclopedia    # Enciclopedia Oficial (wakfu.com)
-npm run ingest -- --wiki --encyclopedia --seed   # todo
 ```
 
-> Los scrapers son best-effort: si una fuente no responde o cambia su HTML, el proceso
-> lo notifica y continúa (la base nunca queda corrupta). El dataset de muestra garantiza
-> que el asistente funcione sin red.
+> **La clave para stats completas es `--cargo`**: las estadísticas de los items NO están en el
+> texto de las páginas de la wiki — viven en su **base de datos Cargo** (tablas `Items`/`Recipes`),
+> que se consultan por API y dan ~5.500 items con mastery/resistencias/etc. y las recetas con
+> ingredientes y cantidades exactas. Eso es lo que le da ground truth al coach.
 
 ## Notas
 

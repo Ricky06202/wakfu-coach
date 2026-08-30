@@ -143,10 +143,16 @@ export function Chat() {
     }
   }
 
-  async function runIngest(kind: "wiki" | "seed" | "encyclopedia", all = false) {
+  async function runIngest(kind: "wiki" | "seed" | "encyclopedia" | "cargo", all = false) {
     if (ingesting) return;
     setIngesting(true);
-    setIngestMsg(all ? "cargando TODA la wiki (puede tardar horas)…" : `cargando ${kind}…`);
+    setIngestMsg(
+      all
+        ? "cargando TODA la wiki (puede tardar horas)…"
+        : kind === "cargo"
+          ? "cargando items y recetas estructurados de la wiki…"
+          : `cargando ${kind}…`,
+    );
     setError(null);
     try {
       const res = await fetch(`${API_BASE}/api/ingest/${kind}`, {
@@ -159,6 +165,7 @@ export function Chat() {
         guides?: number;
         pages?: number;
         items?: number;
+        recipes?: number;
         chunks?: number;
         message?: string;
       };
@@ -175,9 +182,11 @@ export function Chat() {
           ? `wiki completo: ${data.guides ?? data.pages ?? "?"} guías, ${data.chunks ?? "?"} fragmentos`
           : kind === "seed"
             ? `seed cargado: ${data.chunks ?? "?"} fragmentos nuevos`
-            : kind === "wiki"
-              ? `wiki cargado: ${data.guides ?? data.pages ?? "?"} guías, ${data.chunks ?? "?"} fragmentos`
-              : `enciclopedia cargada: ${data.items ?? "?"} objetos`,
+            : kind === "cargo"
+              ? `cargo: ${data.items ?? "?"} items + ${data.recipes ?? "?"} recetas (${data.chunks ?? "?"} fragmentos)`
+              : kind === "wiki"
+                ? `wiki cargado: ${data.guides ?? data.pages ?? "?"} guías, ${data.chunks ?? "?"} fragmentos`
+                : `enciclopedia cargada: ${data.items ?? "?"} objetos`,
       );
       await refreshStats();
     } catch {
@@ -346,6 +355,14 @@ export function Chat() {
           className="rounded border border-ember/40 px-1.5 py-0.5 uppercase tracking-wider text-muted transition hover:border-ember/70 hover:text-ember disabled:opacity-40"
         >
           + wiki todo
+        </button>
+        <button
+          onClick={() => void runIngest("cargo")}
+          disabled={ingesting}
+          title="Descarga TODOS los items con stats y recetas (base Cargo de wakfu.wiki.gg)"
+          className="rounded border border-teal/40 px-1.5 py-0.5 uppercase tracking-wider text-muted transition hover:border-teal/70 hover:text-teal disabled:opacity-40"
+        >
+          + cargo
         </button>
         <button
           onClick={() => void runIngest("encyclopedia")}
