@@ -22,7 +22,29 @@ const STORAGE_KEY = "wakfu-coach:chat:v1";
 const SESSION_KEY = "wakfu-coach:session";
 const PROFILE_KEY = "wakfu-coach:profile";
 
-const PROFILE_FIELDS = ["clase", "nivel", "elemento", "zona", "objetivo"] as const;
+const PROFILE_FIELDS = [
+  "nombre",
+  "clase",
+  "nivel",
+  "elemento",
+  "oficios",
+  "kamas",
+  "zona",
+  "mision",
+  "objetivo",
+] as const;
+
+const PROFILE_PLACEHOLDERS: Record<string, string> = {
+  nombre: "p.ej. Ninivix-Fuego",
+  clase: "ninivix",
+  nivel: "p.ej. 40",
+  elemento: "p.ej. fuego / agua",
+  oficios: "p.ej. herrero, alquimista",
+  kamas: "p.ej. 120k (economía)",
+  zona: "p.ej. Amakna",
+  mision: "lo que te piden ahora",
+  objetivo: "p.ej. subir a nivel 60",
+};
 
 const MAX_IMAGES = 2;
 const MAX_IMAGE_MB = 8;
@@ -98,9 +120,11 @@ export function Chat() {
   }, [profile]);
 
   function setProfileField(field: string, value: string) {
+    // Guardamos el texto CRUDO (sin trim): recortar aquí rompía la barra
+    // espaciadora al borrar los espacios en cada pulsación.
     setProfile((prev) => {
       const next = prev.filter((p) => p.key !== field);
-      if (value.trim()) next.push({ key: field, value: value.trim() });
+      if (value) next.push({ key: field, value });
       return next;
     });
   }
@@ -246,6 +270,8 @@ export function Chat() {
     }
   }
 
+  const profileName = profile.find((p) => p.key === "nombre")?.value?.trim() || "";
+
   return (
     <div className="mx-auto flex h-[calc(100dvh-8rem)] w-full max-w-4xl flex-col overflow-hidden rounded-xl border border-edge bg-panel/90 shadow-2xl backdrop-blur">
       {/* Cabecera — consola táctica */}
@@ -260,7 +286,8 @@ export function Chat() {
         <div className="min-w-0">
           <p className="font-mono text-xs font-bold uppercase tracking-[0.2em] text-paper">Wakfu Coach</p>
           <p className="truncate font-mono text-[11px] text-muted">
-            sesión <span className="text-teal">{session}</span> · cuenta f2p · clase ninivix
+            sesión <span className="text-teal">{session}</span> · cuenta f2p
+            {profileName ? <span> · perfil <span className="text-teal">{profileName}</span></span> : null}
           </p>
         </div>
         <div className="ml-auto flex items-center gap-2">
@@ -346,7 +373,7 @@ export function Chat() {
                   value={profile.find((p) => p.key === f)?.value ?? ""}
                   onChange={(e) => setProfileField(f, e.target.value)}
                   className="w-full rounded border border-edge bg-panel-2 px-2 py-1.5 font-mono text-xs text-paper outline-none transition focus:border-teal/60"
-                  placeholder={f === "objetivo" ? "p.ej. subir a nivel 60" : f === "zona" ? "p.ej. Amakna" : ""}
+                  placeholder={PROFILE_PLACEHOLDERS[f] ?? ""}
                 />
               </label>
             ))}
@@ -363,7 +390,7 @@ export function Chat() {
                 Conectando… <span className="text-teal">_</span>
               </p>
               <p className="mt-1 text-sm text-muted">
-                Pregúntame por builds, recetas, farming y eficiencia para tu cuenta sin abono.
+                Hola{profileName ? `, ${profileName}` : ""} — pregúntame por builds, recetas, farming o eficiencia para tu cuenta sin abono.
               </p>
             </div>
             <div className="flex max-w-xl flex-wrap justify-center gap-2">

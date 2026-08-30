@@ -117,7 +117,7 @@ const chatSchema = z.object({
     .array(
       z.object({
         key: z.string().trim().min(1).max(40),
-        value: z.string().trim().min(1).max(200),
+        value: z.string().trim().max(200),
       }),
     )
     .max(12)
