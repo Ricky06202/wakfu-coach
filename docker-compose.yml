@@ -22,13 +22,17 @@ services:
       # --- LLM local opcional (Ollama). Descomenta si tienes un contenedor Ollama ---
       # OLLAMA_URL: http://host.docker.internal:11434
       # OLLAMA_MODEL: llama3.2:3b
-      # --- LLM OpenAI-compatible con VISIÓN (p.ej. deepseek-v4-flash-vision-exp).
+      # --- LLM con VISIÓN (p.ej. deepseek-v4-flash-vision-exp).
+      # Para visión con DeepSeek usa el endpoint Anthropic-compatible:
+      #   LLM_BASE_URL=https://api.deepseek.com/anthropic  (se autodetecta el formato).
       # La API key va SOLO en el archivo .env del host (compose lo lee automáticamente).
       # Vacíos = modo extractivo sin LLM. ---
       LLM_PROVIDER: ${LLM_PROVIDER:-auto}
       LLM_BASE_URL: ${LLM_BASE_URL:-}
       LLM_API_KEY: ${LLM_API_KEY:-}
       LLM_MODEL: ${LLM_MODEL:-deepseek-v4-flash-vision-exp}
+      LLM_API_STYLE: ${LLM_API_STYLE:-auto}
+      LLM_IMAGE_API: ${LLM_IMAGE_API:-auto}
       LLM_MAX_IMAGES: ${LLM_MAX_IMAGES:-2}
       # --- Orígenes CORS permitidos (separados por coma). Vacío = cualquier origen local ---
       # ALLOWED_ORIGINS: http://192.168.1.20:3000

@@ -19,11 +19,11 @@ const envSchema = z.object({
     .transform((v) => (v && v.trim() ? v.trim() : undefined)),
   OLLAMA_MODEL: z.string().min(1).default("llama3.2:3b"),
   /**
-   * LLM OpenAI-compatible con visión (p.ej. `deepseek-v4-flash-vision-exp`).
-   * `LLM_PROVIDER`: "auto" (Ollama si OLLAMA_URL, si no el endpoint OpenAI) | "ollama" | "openai".
+   * LLM OpenAI/Anthropic-compatible con visión.
+   * `LLM_PROVIDER`: "auto" (Ollama si OLLAMA_URL, si no el endpoint LLM_BASE_URL) | "ollama" | "openai" | "anthropic".
    * La API key NUNCA va en el repo: solo por variable de entorno.
    */
-  LLM_PROVIDER: z.enum(["auto", "ollama", "openai"]).default("auto"),
+  LLM_PROVIDER: z.enum(["auto", "ollama", "openai", "anthropic"]).default("auto"),
   LLM_BASE_URL: z
     .union([z.literal(""), z.string().url()])
     .optional()
@@ -33,6 +33,21 @@ const envSchema = z.object({
     .optional()
     .transform((v) => (v && v.trim() ? v.trim() : undefined)),
   LLM_MODEL: z.string().min(1).default("deepseek-v4-flash-vision-exp"),
+  /**
+   * Estilo de API: "openai" (chat/completions) | "anthropic" (/v1/messages) | "auto"
+   * (detecta por la URL, p.ej. api.deepseek.com/anthropic). Para visión con
+   * DeepSeek hay que usar el endpoint Anthropic-compatible.
+   */
+  LLM_API_STYLE: z.enum(["auto", "openai", "anthropic"]).default("auto"),
+  /**
+   * Formato de las imágenes en el payload:
+   *  "openai"    -> content[].image_url (estándar OpenAI)
+   *  "deepseek"  -> campo message.image[] con base64 puro (API DeepSeek multimodal nativa)
+   *  "anthropic" -> bloques image (Anthropic Messages API)
+   *  "auto"      -> detecta por el host/URL
+   */
+  LLM_IMAGE_API: z.enum(["auto", "openai", "deepseek", "anthropic"]).default("auto"),
+  LLM_ANTHROPIC_VERSION: z.string().min(1).default("2023-06-01"),
   LLM_MAX_IMAGES: z.coerce.number().int().min(0).max(5).default(2),
   LLM_MAX_IMAGE_MB: z.coerce.number().int().min(1).max(20).default(8),
   TOP_K: z.coerce.number().int().positive().max(50).default(8),

@@ -50,15 +50,19 @@ petición, de modo que la IA conserva el hilo de la charla incluso tras recargar
 
 ## Visión (capturas de pantalla del juego)
 
-Con un modelo **OpenAI-compatible con visión** (`LLM_BASE_URL` + `LLM_API_KEY` + `LLM_MODEL`)
-la jugadora puede **adjuntar capturas** (fichas de objeto, recetas, inventario) desde el botón
-de la consola. El flujo:
+Con un modelo **con visión** la jugadora puede **adjuntar capturas** (fichas de objeto, recetas,
+inventario) desde el botón de la consola. El flujo:
 
 1. El modelo de visión lee la captura y extrae el **nombre del objeto** (OCR).
 2. El nombre se busca en los archivos oficiales (SQLite). Si no está registrado →
    respuesta `strict` ("No tengo registrado…") en vez de inventar stats.
 3. Si está registrado → se adjunta la ficha oficial como contexto y el modelo responde
    contrastando la imagen con los datos oficiales.
+
+> **DeepSeek y visión:** el endpoint nativo (`/chat/completions`) acepta el campo `image[]`
+> pero **no procesa imágenes**. Para visión con DeepSeek usa el endpoint **Anthropic-compatible**:
+> `LLM_BASE_URL=https://api.deepseek.com/anthropic` (el formato de imagen se autodetecta por la URL).
+> Verificado: el modelo describe correctamente imágenes adjuntas en este endpoint.
 
 > **Seguridad:** la API key solo se configura por **variable de entorno** (p.ej. `.env` del host o
 > `docker-compose` con `env_file`). **Nunca** se versiona en el repo (que es público).
@@ -107,10 +111,13 @@ npm run ingest     # ejecuta la ingesta manual (ver flags abajo)
 | `AUTO_SEED`        | `true`                     | Siembra el dataset de muestra si la base está vacía |
 | `OLLAMA_URL`       | *(vacío)*                  | URL de Ollama p.ej. `http://host.docker.internal:11434` |
 | `OLLAMA_MODEL`     | `llama3.2:3b`              | Modelo usado en el modo LLM                    |
-| `LLM_PROVIDER`     | `auto`                     | `auto` \| `ollama` \| `openai`                 |
-| `LLM_BASE_URL`     | *(vacío)*                  | Endpoint OpenAI-compatible (visión), p.ej. `https://api.tu-proveedor.example/v1` |
+| `LLM_PROVIDER`     | `auto`                     | `auto` \| `ollama` \| `openai` \| `anthropic` |
+| `LLM_BASE_URL`     | *(vacío)*                  | Endpoint del proveedor. Para visión con DeepSeek usa `https://api.deepseek.com/anthropic` |
 | `LLM_API_KEY`      | *(vacío)*                  | API key del proveedor (**solo por entorno, nunca en el repo**) |
 | `LLM_MODEL`        | `deepseek-v4-flash-vision-exp` | Modelo con visión para analizar capturas   |
+| `LLM_API_STYLE`    | `auto`                     | `auto` \| `openai` \| `anthropic` (se autodetecta por la URL) |
+| `LLM_IMAGE_API`    | `auto`                     | `auto` \| `openai` \| `deepseek` \| `anthropic` |
+| `LLM_ANTHROPIC_VERSION` | `2023-06-01`          | Versión del header `anthropic-version`         |
 | `LLM_MAX_IMAGES`   | `2`                        | Capturas máximas por mensaje                  |
 | `LLM_MAX_IMAGE_MB` | `8`                        | Tamaño máximo por imagen                      |
 | `TOP_K`            | `8`                        | Fragmentos recuperados por consulta            |

@@ -1,6 +1,6 @@
 import { lookupItemByName, lookupRecipeByName, normalizeName, searchChunks, type QueryMatch } from "./db.js";
 import { env } from "./env.js";
-import { buildUserContent, chatCompletions, isOpenAIProviderConfigured, type LlmMessage } from "./llm.js";
+import { apiStyle, buildUserMessage, complete, isOpenAIProviderConfigured, type LlmMessage } from "./llm.js";
 
 /* ------------------------------------------------------------------ */
 /* Recuperación (retrieve)                                             */
@@ -301,7 +301,7 @@ async function generateWithOllama(query: string, context: string, history: Array
   return { answer: data.response?.trim() ?? "", mode: "llm" };
 }
 
-async function generateWithOpenAI(query: string, context: string, history: Array<{ role: string; content: string }>, images: string[] = []): Promise<GenerateResult> {
+async function generateWithLlm(query: string, context: string, history: Array<{ role: string; content: string }>, images: string[] = []): Promise<GenerateResult> {
   const system = images.length ? VISION_SYSTEM_PROMPT : SYSTEM_PROMPT;
   const chat: LlmMessage[] = history
     .slice(-6)
@@ -309,9 +309,9 @@ async function generateWithOpenAI(query: string, context: string, history: Array
   const messages: LlmMessage[] = [
     { role: "system", content: system },
     ...chat,
-    { role: "user", content: buildUserContent(buildPrompt(query, context, history), images) },
+    buildUserMessage(buildPrompt(query, context, history), images),
   ];
-  const answer = await chatCompletions(messages);
+  const answer = await complete(messages);
   return { answer, mode: "llm" };
 }
 
@@ -320,9 +320,9 @@ async function tryExtractName(images: string[]): Promise<string | null> {
   try {
     const messages: LlmMessage[] = [
       { role: "system", content: "Eres un extractor de nombres de objetos del juego Wakfu. Solo devuelves nombres." },
-      { role: "user", content: buildUserContent(EXTRACT_PROMPT, images) },
+      buildUserMessage(EXTRACT_PROMPT, images),
     ];
-    const out = await chatCompletions(messages, { maxTokens: 40, temperature: 0 });
+    const out = await complete(messages, { maxTokens: 120, temperature: 0 });
     const name = out.trim().replace(/^["'¿¡]+|["'¿¡.;:]+$/g, "");
     if (!name || name.toUpperCase() === "DESCONOCIDO" || name.length < 3 || name.length > 60) return null;
     return name;
@@ -428,13 +428,16 @@ export interface RagAnswer {
   entities: Entity[];
 }
 
-type Provider = "ollama" | "openai" | "none";
+type Provider = "ollama" | "openai" | "anthropic" | "none";
 
 function resolveProvider(): Provider {
   if (env.LLM_PROVIDER === "ollama") return env.OLLAMA_URL ? "ollama" : "none";
+  if (env.LLM_PROVIDER === "anthropic") return isOpenAIProviderConfigured() ? "anthropic" : "none";
   if (env.LLM_PROVIDER === "openai") return isOpenAIProviderConfigured() ? "openai" : "none";
   if (env.OLLAMA_URL) return "ollama";
-  if (isOpenAIProviderConfigured()) return "openai";
+  if (isOpenAIProviderConfigured()) {
+    return apiStyle() === "anthropic" ? "anthropic" : "openai";
+  }
   return "none";
 }
 
@@ -471,8 +474,9 @@ export async function answerQuestion(
   let entities: Entity[] = [];
 
   // 1) Imágenes: el modelo de visión lee la captura y busca la ficha oficial.
+  const hasVisionLlm = provider === "openai" || provider === "anthropic";
   let visionName: string | null = null;
-  if (images.length && provider === "openai") {
+  if (images.length && hasVisionLlm) {
     visionName = await tryExtractName(images);
     if (visionName) {
       const found = lookupEntities(visionName);
@@ -519,12 +523,12 @@ export async function answerQuestion(
   const context = [formatContext(hits), entities.length ? formatEntities(entities) : ""].filter(Boolean).join("\n\n");
   let result: GenerateResult;
 
-  if (provider === "openai") {
+  if (provider === "openai" || provider === "anthropic") {
     try {
-      result = await generateWithOpenAI(query, context, history, images);
+      result = await generateWithLlm(query, context, history, images);
       if (!result.answer) throw new Error("respuesta vacía del modelo");
     } catch (err) {
-      console.warn("[rag] fallo de LLM OpenAI, degradando a modo extractivo:", (err as Error).message);
+      console.warn("[rag] fallo de LLM, degradando a modo extractivo:", (err as Error).message);
       result = extractiveAnswer(query, hits, entities);
     }
   } else if (provider === "ollama") {
