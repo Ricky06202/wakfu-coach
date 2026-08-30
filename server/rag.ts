@@ -430,6 +430,24 @@ export interface RagAnswer {
 
 type Provider = "ollama" | "openai" | "anthropic" | "none";
 
+/** Respuestas amables para saludos/charla breve (evitan el "no encontré información"). */
+function smallTalkReply(query: string): string | null {
+  const q = query.trim().toLowerCase();
+  if (/^(hola|buenas|buenos? dias|buenas tardes|buenas noches|hey|hi|hello|saludos|que tal|qué tal|como estas|cómo estás)[\s!.,]*$/i.test(q)) {
+    return "¡Hola! Soy Wakfu Coach, tu asistente para Wakfu en modo free-to-play (clase Ninivix). Pregúntame por builds, recetas, farming o equipamiento.";
+  }
+  if (/^(gracias|muchas gracias|thx|thanks)[\s!.,]*$/i.test(q)) {
+    return "¡De nada! Aquí estoy para lo que necesites: builds, recetas o eficiencia F2P.";
+  }
+  if (/(quien eres|quién eres|que eres|qué eres|como te llamas|como te llamas|qué haces|que haces|que es wakfu|qué es wakfu)/i.test(q)) {
+    return "Soy Wakfu Coach, un asistente RAG con base de conocimiento local (Enciclopedia Oficial y Wiki Oficial de Wakfu), enfocado en cuentas free-to-play y la clase Ninivix.";
+  }
+  if (/^(adios|chao|hasta luego|bye|nos vemos)[\s!.,]*$/i.test(q)) {
+    return "¡Hasta luego! Que el caos te sea leve en el mundo de los Doce. Vuelve cuando quieras.";
+  }
+  return null;
+}
+
 function resolveProvider(): Provider {
   if (env.LLM_PROVIDER === "ollama") return env.OLLAMA_URL ? "ollama" : "none";
   if (env.LLM_PROVIDER === "anthropic") return isOpenAIProviderConfigured() ? "anthropic" : "none";
@@ -464,6 +482,20 @@ export async function answerQuestion(
   const images = opts.images ?? [];
   const provider = resolveProvider();
   const hits = retrieve(query, topK);
+
+  // Charla breve / saludos: no pasa por el RAG (evita "no encontré información").
+  const smallTalk = smallTalkReply(query);
+  if (smallTalk) {
+    return {
+      answer: smallTalk,
+      mode: "extractive",
+      sources: [],
+      retrieved: [],
+      retrievedCount: 0,
+      entities: [],
+    };
+  }
+
   const sources: RagSource[] = hits.map((h) => ({
     title: h.title,
     url: h.url,
