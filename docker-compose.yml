@@ -30,7 +30,10 @@ services:
       LLM_PROVIDER: ${LLM_PROVIDER:-auto}
       LLM_BASE_URL: ${LLM_BASE_URL:-}
       LLM_API_KEY: ${LLM_API_KEY:-}
-      LLM_MODEL: ${LLM_MODEL:-deepseek-v4-flash-vision-exp}
+      # Modelo de CONVERSACIÓN/coach (fuerte): deepseek-chat
+      LLM_MODEL: ${LLM_MODEL:-deepseek-chat}
+      # Modelo de VISIÓN (solo para leer capturas): el 'vision-exp'
+      LLM_VISION_MODEL: ${LLM_VISION_MODEL:-deepseek-v4-flash-vision-exp}
       LLM_API_STYLE: ${LLM_API_STYLE:-auto}
       LLM_IMAGE_API: ${LLM_IMAGE_API:-auto}
       LLM_MAX_IMAGES: ${LLM_MAX_IMAGES:-2}

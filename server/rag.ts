@@ -333,7 +333,7 @@ async function tryExtractName(images: string[]): Promise<string | null> {
       { role: "system", content: "Eres un extractor de nombres de objetos del juego Wakfu. Solo devuelves nombres." },
       buildUserMessage(EXTRACT_PROMPT, images),
     ];
-    const out = await complete(messages, { maxTokens: 120, temperature: 0 });
+    const out = await complete(messages, { maxTokens: 120, temperature: 0, model: env.LLM_VISION_MODEL });
     const name = out.trim().replace(/^["'¿¡]+|["'¿¡.;:]+$/g, "");
     if (!name || name.toUpperCase() === "DESCONOCIDO" || name.length < 3 || name.length > 60) return null;
     return name;

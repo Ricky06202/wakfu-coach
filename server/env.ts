@@ -32,7 +32,9 @@ const envSchema = z.object({
     .string()
     .optional()
     .transform((v) => (v && v.trim() ? v.trim() : undefined)),
-  LLM_MODEL: z.string().min(1).default("deepseek-v4-flash-vision-exp"),
+  LLM_MODEL: z.string().min(1).default("deepseek-chat"),
+  /** Modelo de VISIÓN (solo para leer capturas). Puede diferir del de chat. */
+  LLM_VISION_MODEL: z.string().min(1).default("deepseek-v4-flash-vision-exp"),
   /**
    * Estilo de API: "openai" (chat/completions) | "anthropic" (/v1/messages) | "auto"
    * (detecta por la URL, p.ej. api.deepseek.com/anthropic). Para visión con
@@ -59,8 +61,8 @@ const envSchema = z.object({
     .transform((v) => v.split(",").map((s) => s.trim()).filter(Boolean)),
   RATE_LIMIT_MAX: z.coerce.number().int().positive().default(60),
   RATE_LIMIT_WINDOW_MS: z.coerce.number().int().positive().default(60_000),
-  /** Límite de páginas para la ingesta masiva de la wiki (--all). */
-  INGEST_MAX_PAGES: z.coerce.number().int().positive().default(500),
+  /** Límite de páginas para la ingesta masiva de la wiki (--all). 0 = SIN LÍMITE (toda la wiki). */
+  INGEST_MAX_PAGES: z.coerce.number().int().min(0).default(0),
 });
 
 const parsed = envSchema.safeParse(process.env);

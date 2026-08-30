@@ -114,7 +114,8 @@ npm run ingest     # ejecuta la ingesta manual (ver flags abajo)
 | `LLM_PROVIDER`     | `auto`                     | `auto` \| `ollama` \| `openai` \| `anthropic` |
 | `LLM_BASE_URL`     | *(vacío)*                  | Endpoint del proveedor. Para visión con DeepSeek usa `https://api.deepseek.com/anthropic` |
 | `LLM_API_KEY`      | *(vacío)*                  | API key del proveedor (**solo por entorno, nunca en el repo**) |
-| `LLM_MODEL`        | `deepseek-v4-flash-vision-exp` | Modelo con visión para analizar capturas   |
+| `LLM_MODEL`        | `deepseek-chat`              | Modelo de conversación/coach (fuerte)          |
+| `LLM_VISION_MODEL` | `deepseek-v4-flash-vision-exp` | Modelo de visión (solo para leer capturas)   |
 | `LLM_API_STYLE`    | `auto`                     | `auto` \| `openai` \| `anthropic` (se autodetecta por la URL) |
 | `LLM_IMAGE_API`    | `auto`                     | `auto` \| `openai` \| `deepseek` \| `anthropic` |
 | `LLM_ANTHROPIC_VERSION` | `2023-06-01`          | Versión del header `anthropic-version`         |

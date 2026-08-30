@@ -33,6 +33,8 @@ export interface ChatCompletionsOpts {
   temperature?: number;
   maxTokens?: number;
   json?: boolean;
+  /** Override del modelo (p.ej. usar el de visión solo para extraer capturas). */
+  model?: string;
 }
 
 export type ApiStyle = "openai" | "anthropic";
@@ -118,7 +120,7 @@ export async function chatCompletions(messages: LlmMessage[], opts: ChatCompleti
   }
 
   const body: Record<string, unknown> = {
-    model: env.LLM_MODEL,
+    model: opts.model ?? env.LLM_MODEL,
     messages,
     temperature: opts.temperature ?? env.OLLAMA_TEMPERATURE,
     max_tokens: opts.maxTokens ?? env.MAX_TOKENS,
@@ -174,7 +176,7 @@ export async function anthropicMessages(messages: LlmMessage[], opts: ChatComple
     .join("\n\n");
 
   const body: Record<string, unknown> = {
-    model: env.LLM_MODEL,
+    model: opts.model ?? env.LLM_MODEL,
     max_tokens: opts.maxTokens ?? env.MAX_TOKENS,
     temperature: opts.temperature ?? env.OLLAMA_TEMPERATURE,
     messages: messages
