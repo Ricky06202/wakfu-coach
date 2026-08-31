@@ -14,7 +14,7 @@ import { initDb, raw } from "../db.js";
 import { loadSeed } from "./seed.js";
 import { ingestWikiAll, ingestWikiTerms } from "./wiki.js";
 import { ingestEncyclopedia } from "./encyclopedia.js";
-import { ingestCargo } from "./cargo.js";
+import { ingestCargoAll, ingestCargoTopic } from "./cargo.js";
 
 const DEFAULT_WIKI_TERMS = ["ninivix", "free to play", "professions", "crafting", "wakfu f2p guide"];
 
@@ -26,12 +26,13 @@ interface CliArgs {
   wikiTerms: string[];
   encyclopedia: boolean;
   cargo: boolean;
+  cargoTopics: string[];
   jsonFeed?: string;
   rebuildFts: boolean;
 }
 
 function parseArgs(argv: string[]): CliArgs {
-  const args: CliArgs = { seed: false, wiki: false, wikiAll: false, maxPages: undefined, wikiTerms: [], encyclopedia: false, cargo: false, rebuildFts: false };
+  const args: CliArgs = { seed: false, wiki: false, wikiAll: false, maxPages: undefined, wikiTerms: [], encyclopedia: false, cargo: false, cargoTopics: [], rebuildFts: false };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i] as string;
     switch (a) {
@@ -61,6 +62,7 @@ function parseArgs(argv: string[]): CliArgs {
         break;
       default:
         if (args.wiki) args.wikiTerms.push(a);
+        else if (args.cargo) args.cargoTopics.push(a);
         break;
     }
   }
@@ -71,7 +73,7 @@ async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
   if (!args.seed && !args.wiki && !args.wikiAll && !args.encyclopedia && !args.cargo && !args.rebuildFts) {
     console.log(
-      "Uso:\n  --seed                     dataset de muestra\n  --wiki [términos...]         guías específicas de wakfu.wiki.gg\n  --wiki --all [--max N]       ingesta masiva: TODA la wiki (tarda horas; --max 0 = sin límite)\n  --cargo [--max N]            items + recetas ESTRUCTURADOS (base Cargo de la wiki)\n  --encyclopedia [--json feed] Enciclopedia oficial\n  --rebuild-fts                reconstruir índice FTS5",
+      "Uso:\n  --seed                     dataset de muestra\n  --wiki [términos...]         guías específicas de wakfu.wiki.gg\n  --wiki --all [--max N]       ingesta masiva: TODA la wiki (tarda horas; --max 0 = sin límite)\n  --cargo                      TODO de Cargo: items, recetas, monstruos, hechizos, quests…\n  --cargo <tema...>            solo esos temas (monsters, quests, class_spells…)\n  --encyclopedia [--json feed] Enciclopedia oficial\n  --rebuild-fts                reconstruir índice FTS5",
     );
     return;
   }
@@ -89,8 +91,18 @@ async function main(): Promise<void> {
   }
 
   if (args.cargo) {
-    const s = await ingestCargo({ max: args.maxPages ?? 0 });
-    console.log(`[cargo] items=${s.items} recetas=${s.recipes} chunks=${s.chunks}`);
+    const max = args.maxPages ?? 0;
+    if (args.cargoTopics.length) {
+      for (const t of args.cargoTopics) {
+        const r = await ingestCargoTopic(t, { max });
+        console.log(`[cargo:${r.topic}] filas=${r.rows} chunks=${r.chunks}`);
+      }
+    } else {
+      const s = await ingestCargoAll({ max });
+      console.log(
+        `[cargo] items=${s.items} recetas=${s.recipes} temas=${s.topics.length} filas=${s.rows} chunks=${s.chunks}`,
+      );
+    }
   }
 
   if (args.wikiAll) {

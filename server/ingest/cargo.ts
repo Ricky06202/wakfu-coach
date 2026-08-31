@@ -300,8 +300,29 @@ export async function ingestCargoRecipes(opts: { max?: number; onProgress?: (don
 export async function ingestCargo(opts: { max?: number } = {}): Promise<CargoSummary> {
   const items = await ingestCargoItems({ max: opts.max });
   const recipes = await ingestCargoRecipes({ max: opts.max });
-  void raw; // (import para mantener el módulo de db vivo)
   return { items: items.items, recipes: recipes.recipes, chunks: items.chunks + recipes.chunks };
+}
+
+export interface CargoFullSummary {
+  items: number;
+  recipes: number;
+  topics: Array<{ topic: string; rows: number }>;
+  rows: number;
+  chunks: number;
+}
+
+/** Ingiesta TOTAL: items + recetas + todas las tablas de contenido (monstruos, hechizos, quests…). */
+export async function ingestCargoAll(opts: { max?: number } = {}): Promise<CargoFullSummary> {
+  const items = await ingestCargoItems({ max: opts.max });
+  const recipes = await ingestCargoRecipes({ max: opts.max });
+  const topics = await ingestCargoAllTopics({ max: opts.max });
+  return {
+    items: items.items,
+    recipes: recipes.recipes,
+    topics: topics.topics,
+    rows: topics.rows,
+    chunks: items.chunks + recipes.chunks + topics.chunks,
+  };
 }
 
 /* ------------------------------------------------------------------ */

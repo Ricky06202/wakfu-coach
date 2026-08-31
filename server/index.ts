@@ -16,7 +16,7 @@ import { env } from "./env.js";
 import { loadSeed } from "./ingest/seed.js";
 import { ingestWikiAll, ingestWikiTerms } from "./ingest/wiki.js";
 import { ingestEncyclopedia } from "./ingest/encyclopedia.js";
-import { ingestCargo, ingestCargoAllTopics, ingestCargoTopic } from "./ingest/cargo.js";
+import { ingestCargoAll, ingestCargoTopic } from "./ingest/cargo.js";
 
 /* ------------------------------------------------------------------ */
 /* Arranque de la base + siembra automática                            */
@@ -247,13 +247,10 @@ app.post("/api/ingest/encyclopedia", async (c) => {
   return c.json({ ok: true, ...s });
 });
 
-// Ingesta estructurada desde la base Cargo de la wiki (items + recetas con stats)
+// Ingesta estructurada completa desde la base Cargo de la wiki (TODO: items,
+// recetas, monstruos, hechizos, quests, mazmorras…)
 app.post("/api/ingest/cargo", async (c) => {
-  const body = (await c.req.json().catch(() => ({}))) as { max?: number; all?: boolean; topics?: string[] };
-  if (body.all) {
-    const s = await ingestCargoAllTopics({ max: body.max ?? 0 });
-    return c.json({ ok: true, all: true, ...s });
-  }
+  const body = (await c.req.json().catch(() => ({}))) as { max?: number; topics?: string[] };
   if (body.topics?.length) {
     const out: Array<{ topic: string; rows: number }> = [];
     let rows = 0;
@@ -266,7 +263,7 @@ app.post("/api/ingest/cargo", async (c) => {
     }
     return c.json({ ok: true, topics: out, rows, chunks });
   }
-  const s = await ingestCargo({ max: body.max ?? 0 });
+  const s = await ingestCargoAll({ max: body.max ?? 0 });
   return c.json({ ok: true, ...s });
 });
 

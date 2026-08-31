@@ -147,12 +147,10 @@ export function Chat() {
     if (ingesting) return;
     setIngesting(true);
     setIngestMsg(
-      all
-        ? kind === "cargo"
-          ? "descargando TODO el Cargo de la wiki (items, monstruos, quests…)…"
-          : "cargando TODA la wiki (puede tardar horas)…"
-        : kind === "cargo"
-          ? "cargando items y recetas estructurados de la wiki…"
+      kind === "cargo"
+        ? "descargando TODO el Cargo de la wiki (items, monstruos, hechizos, quests…)…"
+        : all
+          ? "cargando TODA la wiki (puede tardar horas)…"
           : `cargando ${kind}…`,
     );
     setError(null);
@@ -182,14 +180,12 @@ export function Chat() {
         return;
       }
       setIngestMsg(
-        all
-          ? kind === "cargo"
-            ? `cargo todo: ${data.rows ?? "?"} filas, ${(data.topics?.length ?? 0)} temas, ${data.chunks ?? "?"} fragmentos`
-            : `wiki completo: ${data.guides ?? data.pages ?? "?"} guías, ${data.chunks ?? "?"} fragmentos`
-          : kind === "seed"
-            ? `seed cargado: ${data.chunks ?? "?"} fragmentos nuevos`
-            : kind === "cargo"
-              ? `cargo: ${data.items ?? "?"} items + ${data.recipes ?? "?"} recetas (${data.chunks ?? "?"} fragmentos)`
+        kind === "cargo"
+          ? `cargo completo: ${data.items ?? "?"} items + ${data.recipes ?? "?"} recetas, ${data.topics?.length ?? "?"} temas (${data.chunks ?? "?"} fragmentos)`
+          : all
+            ? `wiki completo: ${data.guides ?? data.pages ?? "?"} guías, ${data.chunks ?? "?"} fragmentos`
+            : kind === "seed"
+              ? `seed cargado: ${data.chunks ?? "?"} fragmentos nuevos`
               : kind === "wiki"
                 ? `wiki cargado: ${data.guides ?? data.pages ?? "?"} guías, ${data.chunks ?? "?"} fragmentos`
                 : `enciclopedia cargada: ${data.items ?? "?"} objetos`,
@@ -340,27 +336,12 @@ export function Chat() {
         </span>
         <span className="text-edge">|</span>
         <button
-          onClick={() => void runIngest("seed")}
-          disabled={ingesting}
-          className="rounded border border-edge px-1.5 py-0.5 uppercase tracking-wider text-muted transition hover:border-teal/50 hover:text-teal disabled:opacity-40"
-        >
-          + seed
-        </button>
-        <button
           onClick={() => void runIngest("cargo")}
           disabled={ingesting}
-          title="Descarga TODOS los items con stats y recetas (base Cargo de wakfu.wiki.gg)"
+          title="Extrae TODO del Cargo de la wiki: items, recetas, monstruos, hechizos, quests, mazmorras, drops…"
           className="rounded border border-teal/40 px-1.5 py-0.5 uppercase tracking-wider text-muted transition hover:border-teal/70 hover:text-teal disabled:opacity-40"
         >
-          + cargo
-        </button>
-        <button
-          onClick={() => void runIngest("cargo", true)}
-          disabled={ingesting}
-          title="Descarga TODO el Cargo de la wiki: items, recetas, monstruos, quests, mazmorras, hechizos, drops…"
-          className="rounded border border-teal/40 px-1.5 py-0.5 uppercase tracking-wider text-muted transition hover:border-teal/70 hover:text-teal disabled:opacity-40"
-        >
-          + cargo todo
+          + cargo (todo)
         </button>
         <button
           onClick={() => setShowProfile((v) => !v)}
