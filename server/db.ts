@@ -83,6 +83,17 @@ export const chats = sqliteTable("chats", {
   updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
 });
 
+/** Entidades estructuradas genéricas (monstruos, quests, mazmorras, …) extraídas de Cargo. */
+export const entities = sqliteTable("entities", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  topic: text("topic").notNull(), // monsters | quests | dungeons | locations | ...
+  page: text("page"),
+  title: text("title").notNull(),
+  url: text("url"),
+  data: text("data").notNull(), // JSON con todos los campos de la fila Cargo
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+});
+
 /* ------------------------------------------------------------------ */
 /* Cliente SQLite + Drizzle                                           */
 /* ------------------------------------------------------------------ */
@@ -173,6 +184,16 @@ export function initDb(): void {
       updated_at INTEGER NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS entities (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      topic TEXT NOT NULL,
+      page TEXT,
+      title TEXT NOT NULL,
+      url TEXT,
+      data TEXT NOT NULL,
+      created_at INTEGER NOT NULL
+    );
+
     CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(
       content,
       title,
@@ -200,6 +221,7 @@ export function initDb(): void {
     CREATE INDEX IF NOT EXISTS idx_recipes_item ON recipes(item_id);
     CREATE INDEX IF NOT EXISTS idx_recipes_name_norm ON recipes(item_name_norm);
     CREATE INDEX IF NOT EXISTS idx_guides_tags ON guides(tags);
+    CREATE INDEX IF NOT EXISTS idx_entities_topic ON entities(topic);
   `);
 
   // Migración suave para bases creadas antes de las columnas normalizadas.

@@ -14,7 +14,10 @@ async function api(params: Record<string, string>): Promise<any> {
   for (const [k, v] of Object.entries({ format: "json", formatversion: "2", ...params })) {
     url.searchParams.set(k, v);
   }
-  const res = await fetch(url, { headers: { "User-Agent": USER_AGENT } });
+  const res = await fetch(url, {
+    headers: { "User-Agent": USER_AGENT },
+    signal: AbortSignal.timeout(45_000),
+  });
   if (!res.ok) throw new Error(`wiki.gg API HTTP ${res.status}`);
   return res.json();
 }
@@ -34,13 +37,14 @@ export async function fetchWikitext(title: string): Promise<{ title: string; wik
 }
 
 /**
- * Enumera TODAS las páginas de la wiki (ns0, sin redirects) vía `allpages`,
- * paginando con `apcontinue`. Descarta subpáginas de variantes (contienen "/").
+ * Itera TODAS las páginas de la wiki (ns0, sin redirects) vía `allpages`,
+ * paginando con `apcontinue`, en streaming (no carga todo en memoria).
+ * Descarta stubs y subpáginas de variantes. `maxPages` 0 = sin límite.
  */
-export async function listAllPages(maxPages: number): Promise<string[]> {
-  const titles: string[] = [];
+async function* iterateAllPages(maxPages: number): AsyncGenerator<string> {
   let apcontinue: string | undefined;
-  while (titles.length < maxPages) {
+  let collected = 0;
+  while (maxPages === 0 || collected < maxPages) {
     const params: Record<string, string> = {
       action: "query",
       list: "allpages",
@@ -56,14 +60,14 @@ export async function listAllPages(maxPages: number): Promise<string[]> {
       if (t.includes("/")) continue; // variantes tipo "Item/Legendary"
       if (t.length < 4) continue; // stubs
       if (!/^[\p{L}\p{N}]/u.test(t)) continue; // stubs que empiezan con comillas/símbolos
-      titles.push(t);
-      if (titles.length >= maxPages) break;
+      yield t;
+      collected++;
+      if (maxPages !== 0 && collected >= maxPages) return;
     }
     apcontinue = data?.continue?.apcontinue;
     if (!apcontinue) break;
     await sleep(150);
   }
-  return titles;
 }
 
 /** Convierte wikitext de MediaWiki a markdown plano consumible por el RAG. */
@@ -197,17 +201,20 @@ export async function ingestWikiTerms(terms: string[], opts: { perTerm?: number 
 }
 
 /**
- * Ingesta MASIVA: enumera todas las páginas de la wiki y las procesa
- * hasta `maxPages` (env INGEST_MAX_PAGES o CLI --max).
+ * Ingesta MASIVA: recorre TODAS las páginas de la wiki en streaming y las
+ * procesa. Sin límite por defecto (maxPages 0 = toda la wiki, tarda horas).
+ * Se puede acotar con `maxPages`/env INGEST_MAX_PAGES/CLI --max.
+ * Progreso persistente: cada página se guarda en la base al momento.
  */
-export async function ingestWikiAll(opts: { maxPages?: number; logProgress?: (done: number, total: number) => void } = {}): Promise<WikiSummary> {
-  const maxPages = opts.maxPages ?? env.INGEST_MAX_PAGES;
+export async function ingestWikiAll(opts: { maxPages?: number; logProgress?: (done: number) => void } = {}): Promise<WikiSummary> {
+  const maxPages = opts.maxPages ?? (env.INGEST_MAX_PAGES > 0 ? env.INGEST_MAX_PAGES : 0);
   const summary: WikiSummary = { pages: 0, guides: 0, chunks: 0 };
-  const titles = await listAllPages(maxPages);
-  console.log(`[wiki] ingesta masiva: ${titles.length} páginas objetivo (máx ${maxPages})`);
+  console.log(`[wiki] ingesta masiva ${maxPages === 0 ? "SIN LÍMITE (toda la wiki, puede tardar horas)" : `máx ${maxPages} páginas`}`);
 
-  for (let i = 0; i < titles.length; i++) {
-    const title = titles[i] as string;
+  let total = 0;
+  let lastLog = Date.now();
+  for await (const title of iterateAllPages(maxPages)) {
+    total++;
     try {
       const id = await ingestPage(title, ["wiki"]);
       if (id) {
@@ -218,12 +225,14 @@ export async function ingestWikiAll(opts: { maxPages?: number; logProgress?: (do
     } catch (err) {
       console.warn(`[wiki] error con "${title}":`, (err as Error).message);
     }
-    if ((i + 1) % 50 === 0 || i === titles.length - 1) {
-      console.log(`[wiki] progreso ${i + 1}/${titles.length}`);
-      opts.logProgress?.(i + 1, titles.length);
+    if (total % 100 === 0 || (Date.now() - lastLog > 30_000 && total % 10 === 0)) {
+      console.log(`[wiki] progreso: ${total} títulos procesados (${summary.guides} guías) · chunks=${summary.chunks}`);
+      opts.logProgress?.(total);
+      lastLog = Date.now();
     }
     await sleep(RATE_LIMIT_MS);
   }
+  console.log(`[wiki] fin: ${total} títulos procesados · guías=${summary.guides} chunks=${summary.chunks}`);
   return summary;
 }
 

@@ -17,7 +17,44 @@ import { raw } from "../db.js";
  */
 
 const ENCYC_BASE = "https://www.wakfu.com/es/mmorpg/enciclopedia";
-const USER_AGENT = "wakfu-coach/1.0 (asistente personal RAG)";
+const BROWSER_UA =
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36";
+
+/**
+ * Fetch con headers de navegador y jar de cookies propio.
+ * wakfu.com redirige a `?authlogin=<token>` que setea la cookie SID y vuelve;
+ * fetch estándar no conserva cookies entre saltos, por eso se gestionan aquí.
+ */
+async function fetchWithBrowser(url: string): Promise<string> {
+  const jar = new Map<string, string>();
+  let current = url;
+  for (let hop = 0; hop < 8; hop++) {
+    const headers: Record<string, string> = {
+      "User-Agent": BROWSER_UA,
+      Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+      "Accept-Language": "es-ES,es;q=0.9,en;q=0.8",
+      Referer: "https://www.wakfu.com/",
+    };
+    const cookies = [...jar.entries()].map(([k, v]) => `${k}=${v}`).join("; ");
+    if (cookies) headers.Cookie = cookies;
+    const res = await fetch(current, { headers, redirect: "manual" });
+    const setCookies: string[] =
+      typeof res.headers.getSetCookie === "function" ? res.headers.getSetCookie() : [];
+    for (const sc of setCookies) {
+      const pair = sc.split(";")[0] ?? "";
+      const eq = pair.indexOf("=");
+      if (eq > 0) jar.set(pair.slice(0, eq).trim(), pair.slice(eq + 1).trim());
+    }
+    const loc = res.headers.get("location");
+    if (res.status >= 300 && res.status < 400 && loc) {
+      current = new URL(loc, current).href;
+      continue;
+    }
+    if (!res.ok) throw new Error(`enciclopedia HTTP ${res.status}`);
+    return await res.text();
+  }
+  throw new Error("demasiadas redirecciones de la enciclopedia");
+}
 
 function normalizeWakfuItem(rawItem: Record<string, unknown>): SeedItem {
   return {
@@ -38,7 +75,7 @@ function normalizeWakfuItem(rawItem: Record<string, unknown>): SeedItem {
 
 async function loadJsonFeed(feed: string): Promise<SeedItem[]> {
   const data = feed.startsWith("http")
-    ? await (await fetch(feed, { headers: { "User-Agent": USER_AGENT } })).json()
+    ? await (await fetch(feed, { headers: { "User-Agent": BROWSER_UA } })).json()
     : JSON.parse(readFileSync(feed, "utf8"));
   const list = Array.isArray(data) ? data : data.items;
   if (!Array.isArray(list)) throw new Error(`feed JSON sin clave "items" o sin array raíz`);
@@ -47,9 +84,7 @@ async function loadJsonFeed(feed: string): Promise<SeedItem[]> {
 
 /** Escaneo HTML best-effort: extrae enlaces a fichas del listado. */
 async function scanHtmlListings(): Promise<SeedItem[]> {
-  const res = await fetch(ENCYC_BASE, { headers: { "User-Agent": USER_AGENT } });
-  if (!res.ok) throw new Error(`enciclopedia HTTP ${res.status}`);
-  const html = await res.text();
+  const html = await fetchWithBrowser(ENCYC_BASE);
 
   const found: SeedItem[] = [];
   const linkRe = /href=["']([^"']*enciclopedia[^"']*?)["'][^>]*>([\s\S]*?)<\/a>/gi;
@@ -122,15 +157,14 @@ export async function ingestEncyclopedia(jsonFeed?: string): Promise<EncycSummar
       console.log(`[enciclopedia] ${items.length} fichas desde escaneo HTML`);
     } catch (err) {
       message = (err as Error).message;
-      console.warn(`[enciclopedia] escaneo HTML falló: ${message}`);
-    }
+      console.warn(`[enciclopedia] escaneo HTML falló: ${message}`);    }
   }
 
   if (!items.length) {
     const hint = jsonFeed
       ? "el feed no devolvió fichas."
       : message
-        ? `el sitio respondió un error (${message}). La enciclopedia de wakfu.com usa CloudFront y suele bloquear peticiones de servidores (403).`
+        ? `el sitio respondió un error (${message}). La enciclopedia de wakfu.com usa CloudFront y suele bloquear IPs de servidores; desde tu red doméstica puede funcionar.`
         : "la SPA no expone fichas en su HTML.";
     console.warn(
       `[enciclopedia] no se pudo extraer contenido (${hint}). ` +
