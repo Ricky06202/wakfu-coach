@@ -148,7 +148,9 @@ export function Chat() {
     setIngesting(true);
     setIngestMsg(
       all
-        ? "cargando TODA la wiki (puede tardar horas)…"
+        ? kind === "cargo"
+          ? "descargando TODO el Cargo de la wiki (items, monstruos, quests…)…"
+          : "cargando TODA la wiki (puede tardar horas)…"
         : kind === "cargo"
           ? "cargando items y recetas estructurados de la wiki…"
           : `cargando ${kind}…`,
@@ -167,6 +169,8 @@ export function Chat() {
         items?: number;
         recipes?: number;
         chunks?: number;
+        rows?: number;
+        topics?: Array<{ topic: string }>;
         message?: string;
       };
       if (!res.ok || !data.ok) {
@@ -179,7 +183,9 @@ export function Chat() {
       }
       setIngestMsg(
         all
-          ? `wiki completo: ${data.guides ?? data.pages ?? "?"} guías, ${data.chunks ?? "?"} fragmentos`
+          ? kind === "cargo"
+            ? `cargo todo: ${data.rows ?? "?"} filas, ${(data.topics?.length ?? 0)} temas, ${data.chunks ?? "?"} fragmentos`
+            : `wiki completo: ${data.guides ?? data.pages ?? "?"} guías, ${data.chunks ?? "?"} fragmentos`
           : kind === "seed"
             ? `seed cargado: ${data.chunks ?? "?"} fragmentos nuevos`
             : kind === "cargo"
@@ -341,22 +347,6 @@ export function Chat() {
           + seed
         </button>
         <button
-          onClick={() => void runIngest("wiki")}
-          disabled={ingesting}
-          title="Descarga guías de wakfu.wiki.gg"
-          className="rounded border border-edge px-1.5 py-0.5 uppercase tracking-wider text-muted transition hover:border-teal/50 hover:text-teal disabled:opacity-40"
-        >
-          + wiki
-        </button>
-        <button
-          onClick={() => void runIngest("wiki", true)}
-          disabled={ingesting}
-          title="Ingesta masiva: TODA la wiki de wakfu.wiki.gg (puede tardar horas; recomendado desde CLI con nohup)"
-          className="rounded border border-ember/40 px-1.5 py-0.5 uppercase tracking-wider text-muted transition hover:border-ember/70 hover:text-ember disabled:opacity-40"
-        >
-          + wiki todo
-        </button>
-        <button
           onClick={() => void runIngest("cargo")}
           disabled={ingesting}
           title="Descarga TODOS los items con stats y recetas (base Cargo de wakfu.wiki.gg)"
@@ -365,12 +355,12 @@ export function Chat() {
           + cargo
         </button>
         <button
-          onClick={() => void runIngest("encyclopedia")}
+          onClick={() => void runIngest("cargo", true)}
           disabled={ingesting}
-          title="Escanea wakfu.com/es/mmorpg/enciclopedia (best-effort)"
-          className="rounded border border-edge px-1.5 py-0.5 uppercase tracking-wider text-muted transition hover:border-teal/50 hover:text-teal disabled:opacity-40"
+          title="Descarga TODO el Cargo de la wiki: items, recetas, monstruos, quests, mazmorras, hechizos, drops…"
+          className="rounded border border-teal/40 px-1.5 py-0.5 uppercase tracking-wider text-muted transition hover:border-teal/70 hover:text-teal disabled:opacity-40"
         >
-          + enciclopedia
+          + cargo todo
         </button>
         <button
           onClick={() => setShowProfile((v) => !v)}
