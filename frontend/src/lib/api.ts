@@ -44,7 +44,17 @@ export interface RecipeEntity {
   url: string | null;
 }
 
-export type Entity = ItemEntity | RecipeEntity;
+export type Entity = ItemEntity | RecipeEntity | EntityCard;
+
+/** Tarjeta genérica de entidad Cargo (monstruo, hechizo, mazmorra, …). */
+export interface EntityCard {
+  kind: "entity";
+  topic: string;
+  title: string;
+  url: string | null;
+  imageUrl: string | null;
+  fields: { label: string; value: string }[];
+}
 
 export interface ChatMessage {
   role: "user" | "assistant";

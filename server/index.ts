@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { existsSync, readFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { serve } from "@hono/node-server";
 import { serveStatic } from "@hono/node-server/serve-static";
@@ -16,7 +16,7 @@ import { env } from "./env.js";
 import { loadSeed } from "./ingest/seed.js";
 import { ingestWikiAll, ingestWikiTerms } from "./ingest/wiki.js";
 import { ingestEncyclopedia } from "./ingest/encyclopedia.js";
-import { ingestCargo } from "./ingest/cargo.js";
+import { ingestCargo, ingestCargoAllTopics, ingestCargoTopic } from "./ingest/cargo.js";
 
 /* ------------------------------------------------------------------ */
 /* Arranque de la base + siembra automática                            */
@@ -40,6 +40,25 @@ const candidates = [
   resolve(here, "../frontend/dist"), // dev (server/index.ts)
 ];
 const frontendDist = candidates.find((p) => existsSync(join(p, "index.html")));
+
+/* ------------------------------------------------------------------ */
+/* Proxy de imágenes de la wiki (bloqueo por Referer)                  */
+/* ------------------------------------------------------------------ */
+
+const IMG_CACHE = join(dirname(env.DB_PATH), "images");
+
+/** Proxy que descarga las imágenes de wakfu.wiki.gg con la Referer correcta
+ *  (la wiki da 403 sin ella) y las cachea en disco bajo /app/data/images. */
+async function fetchWikiImage(file: string): Promise<Buffer> {
+  const url = `https://wakfu.wiki.gg/wiki/Special:FilePath/${encodeURIComponent(file)}`;
+  const res = await fetch(url, {
+    headers: { "User-Agent": "wakfu-coach/1.0", Referer: "https://wakfu.wiki.gg/" },
+    redirect: "follow",
+    signal: AbortSignal.timeout(30_000),
+  });
+  if (!res.ok) throw new Error(`wiki img HTTP ${res.status}`);
+  return Buffer.from(await res.arrayBuffer());
+}
 
 /* ------------------------------------------------------------------ */
 /* Middleware de plataforma                                            */
@@ -140,6 +159,30 @@ app.get("/api/health", (c) => {
   });
 });
 
+app.get("/api/img", async (c) => {
+  const f = c.req.query("f");
+  if (!f || !/^[A-Za-z0-9_ .()'+\-]+\.(png|jpe?g|webp|gif)$/i.test(f)) {
+    throw new HTTPException(400, { message: "nombre de imagen inválido" });
+  }
+  const safe = basename(f).replace(/\.{2,}/g, ".");
+  const cachePath = join(IMG_CACHE, safe);
+  try {
+    if (!existsSync(cachePath)) {
+      mkdirSync(dirname(cachePath), { recursive: true });
+      const buf = await fetchWikiImage(safe);
+      writeFileSync(cachePath, buf);
+    }
+    const data = readFileSync(cachePath);
+    const ext = safe.split(".").pop()?.toLowerCase() ?? "png";
+    const ct = ext === "jpg" || ext === "jpeg" ? "image/jpeg" : `image/${ext}`;
+    c.header("Cache-Control", "public, max-age=31536000, immutable");
+    return c.body(data, 200, { "content-type": ct });
+  } catch (err) {
+    console.warn("[img] fallo al obtener", safe, ":", (err as Error).message);
+    throw new HTTPException(502, { message: "no se pudo obtener la imagen" });
+  }
+});
+
 app.get("/api/search", (c) => {
   const q = c.req.query("q")?.trim();
   if (!q) throw new HTTPException(400, { message: "falta el parámetro ?q=" });
@@ -206,7 +249,23 @@ app.post("/api/ingest/encyclopedia", async (c) => {
 
 // Ingesta estructurada desde la base Cargo de la wiki (items + recetas con stats)
 app.post("/api/ingest/cargo", async (c) => {
-  const body = (await c.req.json().catch(() => ({}))) as { max?: number };
+  const body = (await c.req.json().catch(() => ({}))) as { max?: number; all?: boolean; topics?: string[] };
+  if (body.all) {
+    const s = await ingestCargoAllTopics({ max: body.max ?? 0 });
+    return c.json({ ok: true, all: true, ...s });
+  }
+  if (body.topics?.length) {
+    const out: Array<{ topic: string; rows: number }> = [];
+    let rows = 0;
+    let chunks = 0;
+    for (const t of body.topics) {
+      const r = await ingestCargoTopic(t, { max: body.max ?? 0 });
+      out.push({ topic: r.topic, rows: r.rows });
+      rows += r.rows;
+      chunks += r.chunks;
+    }
+    return c.json({ ok: true, topics: out, rows, chunks });
+  }
   const s = await ingestCargo({ max: body.max ?? 0 });
   return c.json({ ok: true, ...s });
 });

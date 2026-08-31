@@ -1,4 +1,4 @@
-import { lookupItemByName, lookupRecipeByName, normalizeName, searchChunks, type QueryMatch } from "./db.js";
+import { lookupItemByName, lookupRecipeByName, normalizeName, raw, searchChunks, type QueryMatch } from "./db.js";
 import { env } from "./env.js";
 import { apiStyle, buildUserMessage, complete, isOpenAIProviderConfigured, type LlmMessage } from "./llm.js";
 
@@ -20,6 +20,7 @@ export interface RagHit {
   url: string | null;
   sourceType: string;
   score: number;
+  sourceId: number | null;
 }
 
 export function retrieve(query: string, topK = env.TOP_K): RagHit[] {
@@ -38,6 +39,7 @@ export function retrieve(query: string, topK = env.TOP_K): RagHit[] {
       url: r.url,
       sourceType: r.sourceType,
       score: r.score,
+      sourceId: r.sourceId,
     };
   });
 }
@@ -73,7 +75,63 @@ export interface RecipeEntity {
   url: string | null;
 }
 
-export type Entity = ItemEntity | RecipeEntity;
+export type Entity = ItemEntity | RecipeEntity | EntityCard;
+
+/** Tarjeta genérica de entidad Cargo (monstruo, hechizo, mazmorra, …). */
+export interface EntityCard {
+  kind: "entity";
+  topic: string;
+  title: string;
+  url: string | null;
+  imageUrl: string | null;
+  fields: { label: string; value: string }[];
+}
+
+function prettyLabel(col: string): string {
+  return col
+    .replace(/[_-]+/g, " ")
+    .replace(/\b\w/g, (ch) => ch.toUpperCase());
+}
+
+/** Construye tarjetas de entidades (monstruos/hechizos/…) desde los hits recuperados. */
+function entityCardsFromHits(hits: RagHit[]): EntityCard[] {
+  const cards: EntityCard[] = [];
+  const seen = new Set<string>();
+  for (const h of hits) {
+    if (h.sourceType !== "entity" || h.sourceId == null) continue;
+    const row = raw
+      .prepare("SELECT topic, title, url, data FROM entities WHERE id = ?")
+      .get(h.sourceId) as { topic: string; title: string; url: string | null; data: string } | undefined;
+    if (!row) continue;
+    const key = `${row.topic}:${row.title}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    let data: Record<string, unknown> = {};
+    try {
+      data = JSON.parse(row.data) as Record<string, unknown>;
+    } catch {
+      /* ignore */
+    }
+    const fields: { label: string; value: string }[] = [];
+    for (const [k, v] of Object.entries(data)) {
+      if (k === "image" || v == null || String(v).trim() === "") continue;
+      const s = String(v).trim();
+      if (s.length > 200) continue;
+      fields.push({ label: prettyLabel(k), value: s });
+      if (fields.length >= 10) break;
+    }
+    const image = typeof data.image === "string" && data.image ? (data.image as string) : null;
+    cards.push({
+      kind: "entity",
+      topic: row.topic,
+      title: row.title,
+      url: row.url,
+      imageUrl: image && !/^["!@#]/.test(image) ? `/api/img?f=${encodeURIComponent(image)}` : null,
+      fields,
+    });
+  }
+  return cards;
+}
 
 /** Palabras que delatan preguntas genéricas (no un objeto concreto). */
 const GENERIC_WORDS = new Set([
@@ -205,6 +263,12 @@ function formatEntities(entities: Entity[]): string {
           e.obtain ? `  Obtención: ${e.obtain}` : null,
           e.url ? `  Fuente: ${e.url}` : null,
         ]
+          .filter(Boolean)
+          .join("\n");
+      }
+      if (e.kind === "entity") {
+        const fx = e.fields.map((f) => `    - ${f.label}: ${f.value}`).join("\n");
+        return [`FICHA (${e.topic}): ${e.title}`, fx ? `  Datos:\n${fx}` : null, e.url ? `  Fuente: ${e.url}` : null]
           .filter(Boolean)
           .join("\n");
       }
@@ -358,6 +422,9 @@ function extractiveAnswer(query: string, hits: RagHit[], entities: Entity[]): Ge
           fx ? `\nEfectos:\n${fx}` : "",
           e.obtain ? `\nCómo se consigue: ${e.obtain}` : "",
         );
+      } else if (e.kind === "entity") {
+        const fx = e.fields.map((f) => `- **${f.label}**: ${f.value}`).join("\n");
+        lines.push(`\n**${e.title}** _(${e.topic})_`, fx ? `\n${fx}` : "");
       } else {
         const ing = e.ingredients.map((i) => `- ${i.quantity}× ${i.name}`).join("\n");
         lines.push(
@@ -379,7 +446,7 @@ function extractiveAnswer(query: string, hits: RagHit[], entities: Entity[]): Ge
   }
 
   const refs: Array<{ label: string; url: string | null }> = [
-    ...entities.map((e) => ({ label: e.kind === "item" ? e.name : `Receta: ${e.itemName}`, url: e.url })),
+    ...entities.map((e) => ({ label: e.kind === "item" ? e.name : e.kind === "entity" ? e.title : `Receta: ${e.itemName}`, url: e.url })),
     ...hits.slice(0, 2).map((h) => ({ label: h.title, url: h.url })),
   ];
   if (refs.length) {
@@ -467,7 +534,7 @@ function resolveProvider(): Provider {
 function dedupeEntities(list: Entity[]): Entity[] {
   const seen = new Set<string>();
   return list.filter((e) => {
-    const k = `${e.kind}:${e.id}`;
+    const k = e.kind === "entity" ? `entity:${e.topic}:${e.title}` : `${e.kind}:${(e as { id: number }).id}`;
     if (seen.has(k)) return false;
     seen.add(k);
     return true;
@@ -544,6 +611,9 @@ export async function answerQuestion(
     entities = dedupeEntities([...entities, ...found.items, ...found.recipes]);
     exactEntity = found.exact;
   }
+
+  // 3) Tarjetas de entidades Cargo (monstruos, hechizos, mazmorras…) de los hits.
+  entities = dedupeEntities([...entities, ...entityCardsFromHits(hits)]);
 
   // Puerta estricta anti-alucinación:
   //  - Por texto: objeto/receta concreto sin coincidencia exacta.

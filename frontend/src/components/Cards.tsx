@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { Entity, ItemEffect, ItemEntity, RecipeEntity } from "../lib/api.ts";
+import type { Entity, EntityCard, ItemEffect, ItemEntity, RecipeEntity } from "../lib/api.ts";
 
 /* ------------------------------------------------------------------ */
 /* Utilidades de rareza y tipos                                        */
@@ -261,6 +261,81 @@ export function RecipeCard({ recipe }: { recipe: RecipeEntity }) {
 }
 
 /* ------------------------------------------------------------------ */
+/* Tarjeta genérica de entidad Cargo (monstruo, hechizo, mazmorra…)   */
+/* ------------------------------------------------------------------ */
+
+const TOPIC_LABEL: Record<string, string> = {
+  monsters: "Monstruo",
+  monster_drops: "Drop",
+  quests: "Misión",
+  dungeons: "Mazmorra",
+  locations: "Zona",
+  resources: "Recurso",
+  harvests: "Recolección",
+  class_spells: "Hechizo",
+  achievements: "Logro",
+  titles: "Título",
+  shop_items: "Tienda",
+  treasures: "Tesoro",
+  blueprints: "Plano",
+  emotes: "Emote",
+};
+
+export function GenericEntityCard({ card }: { card: EntityCard }) {
+  const [broken, setBroken] = useState(false);
+  const topic = TOPIC_LABEL[card.topic] ?? card.topic;
+  return (
+    <article className="flex flex-col overflow-hidden rounded-xl border border-teal/30 bg-panel-2/90 shadow-lg transition hover:border-teal/50">
+      <div className="h-1 w-full bg-gradient-to-r from-transparent via-teal to-transparent" />
+      <div className="flex items-start gap-3 p-3.5">
+        <div className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-teal/30 bg-teal/10 text-teal">
+          {card.imageUrl && !broken ? (
+            <img src={card.imageUrl} alt={card.title} loading="lazy" onError={() => setBroken(true)} className="h-12 w-12 object-contain" />
+          ) : (
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" className="h-7 w-7">
+              <path d="M13 2 4.5 13.5H11L9 22l8.5-11.5H12L13 2Z" />
+            </svg>
+          )}
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2">
+            <h4 className="truncate text-sm font-bold text-paper">{card.title}</h4>
+            <span className="shrink-0 rounded bg-teal/10 px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wide text-teal">
+              {topic}
+            </span>
+          </div>
+        </div>
+      </div>
+
+      {card.fields.length > 0 && (
+        <ul className="mx-3.5 mb-2 grid grid-cols-1 gap-1 rounded-lg border border-edge/60 bg-ink/40 p-2.5 sm:grid-cols-2">
+          {card.fields.map((f, i) => (
+            <li key={i} className="flex items-baseline justify-between gap-2 text-xs">
+              <span className="truncate text-muted">{f.label}</span>
+              <span className="shrink-0 max-w-[60%] truncate font-semibold text-teal">{f.value}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {card.url && (
+        <a
+          href={card.url}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="mt-auto flex items-center justify-between border-t border-edge/60 px-3.5 py-2 text-[11px] font-medium text-teal transition hover:bg-teal/5"
+        >
+          <span className="font-mono uppercase tracking-wider">Ver en la wiki</span>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-3 w-3">
+            <path d="M7 17 17 7M9 7h8v8" />
+          </svg>
+        </a>
+      )}
+    </article>
+  );
+}
+
+/* ------------------------------------------------------------------ */
 /* Contenedor de tarjetas                                              */
 /* ------------------------------------------------------------------ */
 
@@ -273,7 +348,15 @@ export function EntityCards({ entities }: { entities: Entity[] }) {
         Ficha de archivo oficial
       </p>
       <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
-        {entities.map((e) => (e.kind === "item" ? <ItemCard key={`i${e.id}`} item={e} /> : <RecipeCard key={`r${e.id}`} recipe={e} />))}
+        {entities.map((e) =>
+          e.kind === "item" ? (
+            <ItemCard key={`i${e.id}`} item={e} />
+          ) : e.kind === "recipe" ? (
+            <RecipeCard key={`r${e.id}`} recipe={e} />
+          ) : (
+            <GenericEntityCard key={`e${e.topic}:${e.title}`} card={e} />
+          ),
+        )}
       </div>
     </div>
   );

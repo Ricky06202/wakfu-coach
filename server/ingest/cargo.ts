@@ -200,7 +200,7 @@ function rowToSeedItem(row: Record<string, string>): SeedItem | null {
     rarity: mapRarity(row.rarity ?? ""),
     description: description && !/^[#@\[\]|^]*$/.test(description) ? description : undefined,
     effects,
-    imageUrl: image && !isJunkName(image) ? `https://wakfu.wiki.gg/wiki/Special:FilePath/${encodeURIComponent(image)}` : null,
+    imageUrl: image && !isJunkName(image) ? `/api/img?f=${encodeURIComponent(image)}` : null,
     url: `https://wakfu.wiki.gg/wiki/${encodeURIComponent((row.page ?? name).replace(/ /g, "_"))}`,
   };
 }
@@ -302,4 +302,177 @@ export async function ingestCargo(opts: { max?: number } = {}): Promise<CargoSum
   const recipes = await ingestCargoRecipes({ max: opts.max });
   void raw; // (import para mantener el módulo de db vivo)
   return { items: items.items, recipes: recipes.recipes, chunks: items.chunks + recipes.chunks };
+}
+
+/* ------------------------------------------------------------------ */
+/* Ingesta genérica de TODAS las tablas Cargo (monstruos, quests, …)  */
+/* ------------------------------------------------------------------ */
+
+/** Tablas de contenido útiles de la wiki (base Cargo). */
+export const CARGO_TOPICS: Array<{ topic: string; table: string }> = [
+  { topic: "monsters", table: "Monsters" },
+  { topic: "monster_drops", table: "Monster_drops" },
+  { topic: "quests", table: "Quests" },
+  { topic: "dungeons", table: "Dungeons" },
+  { topic: "locations", table: "Locations" },
+  { topic: "resources", table: "Resources" },
+  { topic: "harvests", table: "Harvests" },
+  { topic: "class_spells", table: "Class_spells" },
+  { topic: "achievements", table: "Achievements" },
+  { topic: "titles", table: "Titles" },
+  { topic: "shop_items", table: "Shop_items" },
+  { topic: "treasures", table: "Treasures" },
+  { topic: "blueprints", table: "Blueprints" },
+  { topic: "emotes", table: "Emotes" },
+];
+
+const SCHEMA_CACHE = new Map<string, string[]>();
+
+/** Columnas de una tabla Cargo (desde Special:CargoTables/<Tabla>). */
+async function getTableColumns(table: string): Promise<string[]> {
+  const cached = SCHEMA_CACHE.get(table);
+  if (cached) return cached;
+  const res = await fetch(`https://wakfu.wiki.gg/wiki/Special:CargoTables/${encodeURIComponent(table)}`, {
+    headers: { "User-Agent": USER_AGENT },
+    signal: AbortSignal.timeout(45_000),
+  });
+  if (!res.ok) throw new Error(`esquema Cargo HTTP ${res.status}`);
+  const html = await res.text();
+  const cols: string[] = [];
+
+  const cleanCell = (c: string) => cleanText(c.replace(/<[^>]+>/g, " "));
+  const validIdent = (c: string) => /^[a-zA-Z_][a-zA-Z0-9_]*$/.test(c);
+
+  // wiki.gg usa la extensión "Librarian tables": la clase está en un <div> y el
+  // <table> va DESPUÉS; el nombre de campo vive en un <th scope="row">.
+  const marker = html.indexOf("librarian-tables__structure-table");
+  const tableStart = marker >= 0 ? html.indexOf("<table", marker) : -1;
+  const tableEnd = tableStart >= 0 ? html.indexOf("</table>", tableStart) : -1;
+
+  const grab = (tableHtml: string): void => {
+    const trRe = /<tr[^>]*>[\s\S]*?<\/tr>/g;
+    let m: RegExpExecArray | null;
+    let first = true;
+    while ((m = trRe.exec(tableHtml)) !== null) {
+      const ths = [...(m[0] as string).matchAll(/<th[^>]*>([\s\S]*?)<\/th>/g)].map((x) => cleanCell(x[1] as string));
+      const tds = [...(m[0] as string).matchAll(/<td[^>]*>([\s\S]*?)<\/td>/g)].map((x) => cleanCell(x[1] as string));
+      if (first) {
+        first = false;
+        continue; // fila de cabecera (Name/Value type/Constraints)
+      }
+      const name = ths[0] && validIdent(ths[0]) ? (ths[0] as string) : tds[0] && validIdent(tds[0]) ? (tds[0] as string) : "";
+      if (name && name !== "_pageName" && !cols.includes(name)) cols.push(name);
+    }
+  };
+
+  if (marker >= 0 && tableStart >= 0 && tableEnd >= 0) {
+    grab(html.slice(tableStart, tableEnd + 8));
+  } else {
+    // Fallback: cualquier tabla con encabezado "Name".
+    const headerIdx = html.search(/<th[^>]*>\s*Name\s*<\/th>/i);
+    if (headerIdx >= 0) {
+      const ts = html.lastIndexOf("<table", headerIdx);
+      const te = html.indexOf("</table>", headerIdx);
+      if (ts >= 0 && te >= 0) grab(html.slice(ts, te + 8));
+    }
+  }
+
+  SCHEMA_CACHE.set(table, cols);
+  return cols;
+}
+
+function prettyLabel(col: string): string {
+  return col
+    .replace(/[_-]+/g, " ")
+    .replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+/** Convierte una fila Cargo en texto legible para el RAG. */
+function formatEntityText(page: string, row: Record<string, string>, cols: string[]): string {
+  const lines: string[] = [];
+  for (const c of cols) {
+    const v = cleanText(row[c] ?? "");
+    if (!v || v === page) continue;
+    if (v.length > 600) continue;
+    lines.push(`- ${prettyLabel(c)}: ${v}`);
+  }
+  return lines.join("\n");
+}
+
+/** Ingiere una tabla Cargo completa en la tabla genérica `entities` + chunks. */
+export async function ingestCargoTopic(topic: string, opts: { max?: number; onProgress?: (done: number) => void } = {}): Promise<{ topic: string; rows: number; chunks: number }> {
+  const found = CARGO_TOPICS.find((t) => t.topic === topic);
+  if (!found) {
+    const available = CARGO_TOPICS.map((t) => t.topic).join(", ");
+    throw new Error(`tema "${topic}" desconocido. Disponibles: ${available}`);
+  }
+  const { table } = found;
+  const cols = await getTableColumns(table);
+  if (!cols.length) throw new Error(`la tabla Cargo "${table}" no expone columnas`);
+
+  const fields = `_pageName=page,${cols.join(",")}`;
+  let offset = 0;
+  let rowsN = 0;
+  let chunksN = 0;
+  const max = opts.max ?? 0;
+
+  while (true) {
+    if (max > 0 && rowsN >= max) break;
+    const batch = await cargoQuery(table, fields, undefined, BATCH, offset);
+    if (!batch.length) break;
+    for (const row of batch) {
+      if (max > 0 && rowsN >= max) break;
+      const page = cleanText(row.page ?? "");
+      if (!page || isJunkName(page)) continue;
+      const title = page;
+      const url = `https://wakfu.wiki.gg/wiki/${encodeURIComponent(page.replace(/ /g, "_"))}`;
+      const text = formatEntityText(page, row, cols);
+      if (!text) continue;
+      const data: Record<string, string> = {};
+      for (const c of cols) data[c] = row[c] ?? "";
+
+      const existing = raw.prepare("SELECT id FROM entities WHERE topic=? AND page=?").get(topic, page) as { id: number } | undefined;
+      let entityId: number;
+      if (existing) {
+        entityId = existing.id;
+        raw.prepare("UPDATE entities SET title=?, url=?, data=? WHERE id=?").run(title, url, JSON.stringify(data), entityId);
+      } else {
+        entityId = Number(
+          raw
+            .prepare("INSERT INTO entities (topic,page,title,url,data,created_at) VALUES (?,?,?,?,?,?)")
+            .run(topic, page, title, url, JSON.stringify(data), Date.now()).lastInsertRowid,
+        );
+      }
+      raw.prepare("DELETE FROM chunks WHERE source_type='entity' AND source_id=?").run(entityId);
+      raw
+        .prepare("INSERT INTO chunks (source_type, source_id, title, content, tags, weight, url, created_at) VALUES (?,?,?,?,?,?,?,?)")
+        .run("entity", entityId, title, text, JSON.stringify([topic, ...topic.split("_")]), 1.0, url, Date.now());
+      rowsN++;
+      chunksN++;
+    }
+    console.log(`[cargo:${topic}] ${rowsN} filas (offset ${offset})`);
+    opts.onProgress?.(rowsN);
+    if (batch.length < BATCH) break;
+    offset += BATCH;
+    await sleep(RATE_LIMIT_MS);
+  }
+  return { topic, rows: rowsN, chunks: chunksN };
+}
+
+/** Ingiesta todas las tablas de contenido de la wiki. */
+export async function ingestCargoAllTopics(opts: { max?: number } = {}): Promise<{ topics: Array<{ topic: string; rows: number }>; rows: number; chunks: number }> {
+  const topics: Array<{ topic: string; rows: number }> = [];
+  let rows = 0;
+  let chunks = 0;
+  for (const { topic } of CARGO_TOPICS) {
+    try {
+      const r = await ingestCargoTopic(topic, { max: opts.max });
+      topics.push({ topic, rows: r.rows });
+      rows += r.rows;
+      chunks += r.chunks;
+    } catch (err) {
+      console.warn(`[cargo] fallo en tema "${topic}":`, (err as Error).message);
+    }
+  }
+  return { topics, rows, chunks };
 }
