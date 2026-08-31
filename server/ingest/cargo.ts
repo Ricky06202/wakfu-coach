@@ -309,6 +309,7 @@ export interface CargoFullSummary {
   topics: Array<{ topic: string; rows: number }>;
   rows: number;
   chunks: number;
+  errors?: string[];
 }
 
 /** Ingiesta TOTAL: items + recetas + todas las tablas de contenido (monstruos, hechizos, quests…). */
@@ -322,6 +323,7 @@ export async function ingestCargoAll(opts: { max?: number } = {}): Promise<Cargo
     topics: topics.topics,
     rows: topics.rows,
     chunks: items.chunks + recipes.chunks + topics.chunks,
+    errors: topics.errors,
   };
 }
 
@@ -349,16 +351,17 @@ export const CARGO_TOPICS: Array<{ topic: string; table: string }> = [
 
 const SCHEMA_CACHE = new Map<string, string[]>();
 
-/** Columnas de una tabla Cargo (desde Special:CargoTables/<Tabla>). */
-async function getTableColumns(table: string): Promise<string[]> {
+/** Columnas de una tabla Cargo (desde Special:CargoTables/<Tabla>), con retry. */
+async function getTableColumns(table: string, attempt = 0): Promise<string[]> {
   const cached = SCHEMA_CACHE.get(table);
   if (cached) return cached;
-  const res = await fetch(`https://wakfu.wiki.gg/wiki/Special:CargoTables/${encodeURIComponent(table)}`, {
-    headers: { "User-Agent": USER_AGENT },
-    signal: AbortSignal.timeout(45_000),
-  });
-  if (!res.ok) throw new Error(`esquema Cargo HTTP ${res.status}`);
-  const html = await res.text();
+  try {
+    const res = await fetch(`https://wakfu.wiki.gg/wiki/Special:CargoTables/${encodeURIComponent(table)}`, {
+      headers: { "User-Agent": USER_AGENT, Referer: "https://wakfu.wiki.gg/" },
+      signal: AbortSignal.timeout(45_000),
+    });
+    if (!res.ok) throw new Error(`esquema Cargo HTTP ${res.status}`);
+    const html = await res.text();
   const cols: string[] = [];
 
   const cleanCell = (c: string) => cleanText(c.replace(/<[^>]+>/g, " "));
@@ -400,6 +403,14 @@ async function getTableColumns(table: string): Promise<string[]> {
 
   SCHEMA_CACHE.set(table, cols);
   return cols;
+  } catch (err) {
+    if (attempt < 2) {
+      console.warn(`[cargo] esquema de "${table}" falló (${(err as Error).message}), reintento ${attempt + 1}…`);
+      await sleep(2500);
+      return getTableColumns(table, attempt + 1);
+    }
+    throw err;
+  }
 }
 
 function prettyLabel(col: string): string {
@@ -481,8 +492,9 @@ export async function ingestCargoTopic(topic: string, opts: { max?: number; onPr
 }
 
 /** Ingiesta todas las tablas de contenido de la wiki. */
-export async function ingestCargoAllTopics(opts: { max?: number } = {}): Promise<{ topics: Array<{ topic: string; rows: number }>; rows: number; chunks: number }> {
+export async function ingestCargoAllTopics(opts: { max?: number } = {}): Promise<{ topics: Array<{ topic: string; rows: number }>; rows: number; chunks: number; errors: string[] }> {
   const topics: Array<{ topic: string; rows: number }> = [];
+  const errors: string[] = [];
   let rows = 0;
   let chunks = 0;
   for (const { topic } of CARGO_TOPICS) {
@@ -491,9 +503,13 @@ export async function ingestCargoAllTopics(opts: { max?: number } = {}): Promise
       topics.push({ topic, rows: r.rows });
       rows += r.rows;
       chunks += r.chunks;
+      console.log(`[cargo:${topic}] OK · ${r.rows} filas`);
     } catch (err) {
+      const msg = `${topic}: ${(err as Error).message}`;
+      errors.push(msg);
       console.warn(`[cargo] fallo en tema "${topic}":`, (err as Error).message);
     }
+    await sleep(RATE_LIMIT_MS);
   }
-  return { topics, rows, chunks };
+  return { topics, rows, chunks, errors };
 }

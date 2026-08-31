@@ -169,6 +169,7 @@ export function Chat() {
         chunks?: number;
         rows?: number;
         topics?: Array<{ topic: string }>;
+        errors?: string[];
         message?: string;
       };
       if (!res.ok || !data.ok) {
@@ -179,16 +180,19 @@ export function Chat() {
         setIngestMsg(data.message);
         return;
       }
+      if (kind === "cargo") {
+        const base = `cargo completo: ${data.items ?? "?"} items + ${data.recipes ?? "?"} recetas, ${data.topics?.length ?? 0} temas (${data.chunks ?? "?"} fragmentos)`;
+        setIngestMsg((data.errors?.length ?? 0) > 0 ? `${base} · fallos: ${data.errors!.length}` : base);
+        return;
+      }
       setIngestMsg(
-        kind === "cargo"
-          ? `cargo completo: ${data.items ?? "?"} items + ${data.recipes ?? "?"} recetas, ${data.topics?.length ?? "?"} temas (${data.chunks ?? "?"} fragmentos)`
-          : all
-            ? `wiki completo: ${data.guides ?? data.pages ?? "?"} guías, ${data.chunks ?? "?"} fragmentos`
-            : kind === "seed"
-              ? `seed cargado: ${data.chunks ?? "?"} fragmentos nuevos`
-              : kind === "wiki"
-                ? `wiki cargado: ${data.guides ?? data.pages ?? "?"} guías, ${data.chunks ?? "?"} fragmentos`
-                : `enciclopedia cargada: ${data.items ?? "?"} objetos`,
+        all
+          ? `wiki completo: ${data.guides ?? data.pages ?? "?"} guías, ${data.chunks ?? "?"} fragmentos`
+          : kind === "seed"
+            ? `seed cargado: ${data.chunks ?? "?"} fragmentos nuevos`
+            : kind === "wiki"
+              ? `wiki cargado: ${data.guides ?? data.pages ?? "?"} guías, ${data.chunks ?? "?"} fragmentos`
+              : `enciclopedia cargada: ${data.items ?? "?"} objetos`,
       );
       await refreshStats();
     } catch {
