@@ -541,6 +541,43 @@ function dedupeEntities(list: Entity[]): Entity[] {
   });
 }
 
+/* ------------------------------------------------------------------ */
+/* Detección difusa de clases (typos tipo "aniripsa" -> "eniripsa")   */
+/* ------------------------------------------------------------------ */
+
+const WAKFU_CLASSES = [
+  "eniripsa", "enutrof", "ecaflip", "iop", "cra", "feca", "sram", "xelor",
+  "sacrieur", "sadida", "osamodas", "pandawa", "roublard", "masqueraider",
+  "eliotrope", "huppermage", "foggernaut", "ouginak", "steamer", "ninivix", "zobal",
+];
+
+function levenshtein(a: string, b: string): number {
+  const dp = Array.from({ length: a.length + 1 }, (_, i) => [i, ...Array(b.length).fill(0)]);
+  for (let j = 0; j <= b.length; j++) dp[0]![j] = j;
+  for (let i = 1; i <= a.length; i++) {
+    for (let j = 1; j <= b.length; j++) {
+      dp[i]![j] = Math.min(
+        dp[i - 1]![j]! + 1,
+        dp[i]![j - 1]! + 1,
+        dp[i - 1]![j - 1]! + (a[i - 1] === b[j - 1] ? 0 : 1),
+      );
+    }
+  }
+  return dp[a.length]![b.length]!;
+}
+
+/** Clases del juego mencionadas (con tolerancia a typos) para priorizar su búsqueda. */
+function classBoostTerms(query: string): string[] {
+  const tokens = normalizeName(query).split(" ").filter((t) => t.length >= 4);
+  const found: string[] = [];
+  for (const tok of tokens) {
+    for (const cls of WAKFU_CLASSES) {
+      if (levenshtein(tok, cls) <= 2 && !found.includes(cls)) found.push(cls);
+    }
+  }
+  return found;
+}
+
 export interface AnswerOptions {
   images?: string[];
   profile?: PlayerProfile;
@@ -556,9 +593,11 @@ export async function answerQuestion(
   const profile = (opts.profile ?? []).filter((p) => p.key.trim() && p.value.trim());
   const provider = resolveProvider();
 
-  // Recuperación sobre la consulta REAL (el perfil NO se inyecta en el query,
-  // se usa como boost posterior para no contaminar la relevancia).
-  const hits = retrieve(query, topK);
+  // Recuperación sobre la consulta REAL enriquecida con las clases detectadas
+  // (tolera typos como "aniripsa" -> "eniripsa"). El perfil NO se inyecta en el
+  // query (se usa como boost posterior para no contaminar la relevancia).
+  const classTerms = classBoostTerms(query);
+  const hits = retrieve([query, ...classTerms].join(" "), topK);
 
   // Boost posterior: si un fragmento menciona la clase/elemento/oficios del
   // perfil, sube su relevancia para el consejo de la jugadora.
