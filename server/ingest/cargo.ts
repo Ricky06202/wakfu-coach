@@ -1,4 +1,4 @@
-import { replaceItemChunk, replaceRecipeChunk, slugify, upsertItem, upsertRecipe } from "./common.js";
+import { replaceItemChunk, replaceRecipeChunk, slugify, upsertChunk, upsertItem, upsertRecipe } from "./common.js";
 import type { SeedItem, SeedRecipe } from "../seed-data.js";
 import { raw } from "../db.js";
 
@@ -475,10 +475,15 @@ export async function ingestCargoTopic(topic: string, opts: { max?: number; onPr
             .run(topic, page, title, url, JSON.stringify(data), Date.now()).lastInsertRowid,
         );
       }
-      raw.prepare("DELETE FROM chunks WHERE source_type='entity' AND source_id=?").run(entityId);
-      raw
-        .prepare("INSERT INTO chunks (source_type, source_id, title, content, tags, weight, url, created_at) VALUES (?,?,?,?,?,?,?,?)")
-        .run("entity", entityId, title, text, JSON.stringify([topic, ...topic.split("_")]), 1.0, url, Date.now());
+      upsertChunk(
+        "entity",
+        entityId,
+        title,
+        text,
+        [topic, ...topic.split("_")],
+        1.0,
+        url,
+      );
       rowsN++;
       chunksN++;
     }

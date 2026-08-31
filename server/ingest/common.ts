@@ -47,6 +47,8 @@ export function upsertGuide(g: SeedGuide): number {
 }
 
 export function replaceGuideChunks(guideId: number, g: SeedGuide): void {
+  // Las guías generan varios chunks con el mismo source_id; son pocas y pequeñas,
+  // así que el borrado+inserción es aceptable (no es el bulk de Cargo).
   raw.prepare("DELETE FROM chunks WHERE source_type = 'guide' AND source_id = ?").run(guideId);
   const chunksOut = chunkText(g.title, g.content, g.tags, g.url);
   for (const c of chunksOut) {
@@ -93,7 +95,6 @@ export function upsertItem(it: SeedItem): number {
 }
 
 export function replaceItemChunk(itemId: number, it: SeedItem): void {
-  raw.prepare("DELETE FROM chunks WHERE source_type = 'item' AND source_id = ?").run(itemId);
   const effects = it.effects.map((e) => `- ${e.label}: ${e.value}`).join("\n");
   const content = [
     it.description ? `Descripción: ${it.description}` : null,
@@ -104,18 +105,15 @@ export function replaceItemChunk(itemId: number, it: SeedItem): void {
     .filter(Boolean)
     .join("\n\n");
 
-  db.insert(chunks)
-    .values({
-      sourceType: "item",
-      sourceId: itemId,
-      title: `Ficha: ${it.name}`,
-      content,
-      tags: JSON.stringify(["objeto", it.type, it.category ?? "", it.rarity].filter(Boolean)),
-      weight: 1.0,
-      url: it.url,
-      createdAt: now(),
-    })
-    .run();
+  upsertChunk(
+    "item",
+    itemId,
+    `Ficha: ${it.name}`,
+    content,
+    ["objeto", it.type, it.category ?? "", it.rarity].filter(Boolean),
+    1.0,
+    it.url,
+  );
 }
 
 /* ------------------------------- Recetas ------------------------------ */
@@ -152,7 +150,6 @@ export function upsertRecipe(r: SeedRecipe): number {
 }
 
 export function replaceRecipeChunk(recipeId: number, r: SeedRecipe): void {
-  raw.prepare("DELETE FROM chunks WHERE source_type = 'recipe' AND source_id = ?").run(recipeId);
   const ing = r.ingredients.map((i) => `- ${i.quantity}× ${i.name}`).join("\n");
   const content = [
     `Oficio: ${r.profession} (nivel ${r.professionLevel})`,
@@ -163,18 +160,7 @@ export function replaceRecipeChunk(recipeId: number, r: SeedRecipe): void {
     .filter(Boolean)
     .join("\n\n");
 
-  db.insert(chunks)
-    .values({
-      sourceType: "recipe",
-      sourceId: recipeId,
-      title: `Receta: ${r.itemName}`,
-      content,
-      tags: JSON.stringify(["receta", r.profession, "f2p"]),
-      weight: 1.0,
-      url: r.url,
-      createdAt: now(),
-    })
-    .run();
+  upsertChunk("recipe", recipeId, `Receta: ${r.itemName}`, content, ["receta", r.profession, "f2p"], 1.0, r.url);
 }
 
 export function slugify(s: string): string {
@@ -184,4 +170,32 @@ export function slugify(s: string): string {
     .replace(/[\u0300-\u036f]/g, "")
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/(^-|-$)/g, "");
+}
+
+/**
+ * Inserta o actualiza un fragmento (idempotente y a prueba de cortes):
+ * NUNCA borra antes de insertar, así que si la ingesta se interrumpe a mitad
+ * no deja la base mermada. Los triggers FTS5 se encargan de sincronizar.
+ */
+export function upsertChunk(
+  sourceType: string,
+  sourceId: number,
+  title: string,
+  content: string,
+  tags: string[],
+  weight: number,
+  url: string | null,
+): void {
+  const existing = raw
+    .prepare("SELECT id FROM chunks WHERE source_type = ? AND source_id = ?")
+    .get(sourceType, sourceId) as { id: number } | undefined;
+  if (existing) {
+    raw
+      .prepare("UPDATE chunks SET title = ?, content = ?, tags = ?, weight = ?, url = ? WHERE id = ?")
+      .run(title, content, JSON.stringify(tags), weight, url, existing.id);
+  } else {
+    raw
+      .prepare("INSERT INTO chunks (source_type, source_id, title, content, tags, weight, url, created_at) VALUES (?,?,?,?,?,?,?,?)")
+      .run(sourceType, sourceId, title, content, JSON.stringify(tags), weight, url, Date.now());
+  }
 }
